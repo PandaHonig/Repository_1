@@ -906,7 +906,7 @@ class CircularEconomyDashboard:
         mix_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
         mix_frame.pack(fill="x", padx=10, pady=5)
         # ——— 电价面板 ———
-        price_frame = ttk.Frame(mix_frame)
+        price_frame = ttk.Frame(mix_frame, style="Panel.TFrame")
         price_frame.pack(fill="x", pady=5)
 
         ttk.Checkbutton(
@@ -922,7 +922,7 @@ class CircularEconomyDashboard:
             width=6
         )
         self.realtime_price_entry.pack(side="left", padx=(10,2))
-        ttk.Label(price_frame, text="€/kWh").pack(side="left")
+        ttk.Label(price_frame, text="€/kWh", style="Panel.TLabel").pack(side="left")
 
         # 默认禁用，只有勾选"使用实时电价"才可编辑
         self.realtime_price_entry.config(state="disabled")
@@ -932,7 +932,8 @@ class CircularEconomyDashboard:
         solar_row.pack(fill="x", pady=2)
         ttk.Label(solar_row, text="阳Solar (%)", style="Value.TLabel", width=10).pack(side="left")
         solar_scale = ttk.Scale(solar_row, from_=0, to=100, orient="horizontal",
-            variable=self.solar_pct, command=lambda v: self.on_slider_change('solar', float(v)))
+            variable=self.solar_pct, command=lambda v: self.on_slider_change('solar', float(v)),
+            style="Futuristic.Horizontal.TScale")
         solar_scale.pack(side="left", fill="x", expand=True, padx=5)
         self.solar_val_label = ttk.Label(solar_row, text=f"{self.solar_pct.get():.0f}%", style="Value.TLabel", width=4)
         self.solar_val_label.pack(side="right")
@@ -942,7 +943,8 @@ class CircularEconomyDashboard:
         wind_row.pack(fill="x", pady=2)
         ttk.Label(wind_row, text="风Wind (%)", style="Value.TLabel", width=10).pack(side="left")
         wind_scale = ttk.Scale(wind_row, from_=0, to=100, orient="horizontal",
-            variable=self.wind_pct, command=lambda v: self.on_slider_change('wind', float(v)))
+            variable=self.wind_pct, command=lambda v: self.on_slider_change('wind', float(v)),
+            style="Futuristic.Horizontal.TScale")
         wind_scale.pack(side="left", fill="x", expand=True, padx=5)
         self.wind_val_label = ttk.Label(wind_row, text=f"{self.wind_pct.get():.0f}%", style="Value.TLabel", width=4)
         self.wind_val_label.pack(side="right")
@@ -952,7 +954,8 @@ class CircularEconomyDashboard:
         thermal_row.pack(fill="x", pady=2)
         ttk.Label(thermal_row, text="火Kohl (%)", style="Value.TLabel", width=10).pack(side="left")
         thermal_scale = ttk.Scale(thermal_row, from_=0, to=100, orient="horizontal",
-            variable=self.thermal_pct, command=lambda v: self.on_slider_change('thermal', float(v)))
+            variable=self.thermal_pct, command=lambda v: self.on_slider_change('thermal', float(v)),
+            style="Futuristic.Horizontal.TScale")
         thermal_scale.pack(side="left", fill="x", expand=True, padx=5)
         self.thermal_val_label = ttk.Label(thermal_row, text=f"{self.thermal_pct.get():.0f}%", style="Value.TLabel", width=4)
         self.thermal_val_label.pack(side="right")
