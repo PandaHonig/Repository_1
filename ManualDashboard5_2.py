@@ -8,11 +8,9 @@ Baseline: 0 % reuse, 0 % recycle, 100 % fossil (worst-case scenario)
 import tkinter as tk
 from tkinter import ttk
 import math
-from collections import deque
 import requests
 import xml.etree.ElementTree as ET
 import datetime
-import time
 from zoneinfo import ZoneInfo
 import re
 
@@ -460,188 +458,120 @@ class ComparisonChart(FuturisticChart):
             fill=COLORS["text_secondary"], font=("Segoe UI", 8)
         )
 
-class TimeSeriesChart(FuturisticChart):
-    """A futuristic time series chart"""
-    #  This chart displays multiple time series data points over time, 60(20) points max.
-    def __init__(self, parent, width=900, height=250, max_points=60):
+class RecordBarChart(FuturisticChart):
+    """A chart showing up to three saved records as grouped bars"""
+
+    def __init__(self, parent, width=900, height=250, max_records=3):
         """Initialize the chart"""
         super().__init__(parent, width, height)
-        
-        # Data storage
-        self.max_points = max_points
-        self.time_points = deque(maxlen=max_points)
-        self.energy_points = deque(maxlen=max_points)
-        self.co2_points = deque(maxlen=max_points)
-        self.brass_points = deque(maxlen=max_points)
-        self.plastic_points = deque(maxlen=max_points)
-        self.cost_points = deque(maxlen=max_points)
-        
-        # Colors for data series
+
+        self.max_records = max_records
+        self.records = []
         self.colors = {
             "energy": COLORS["metric1"],
             "co2": COLORS["metric3"],
+            "cost": COLORS["metric2"],
             "brass": COLORS["material1"],
             "plastic": COLORS["material2"],
-            "cost": COLORS["metric2"]
         }
-        
-        # Initialize with empty data to draw the axes
+
         self.update_chart()
-    
-    def add_data_point(self, energy, co2, brass, plastic, cost):
-        """Add a new data point to the time series"""
-        current_time = datetime.datetime.now()
-        
-        # Add data to deques
-        self.time_points.append(current_time)
-        self.energy_points.append(energy)
-        self.co2_points.append(co2)
-        self.brass_points.append(brass)
-        self.plastic_points.append(plastic)
-        self.cost_points.append(cost)
-        
-        # Update the chart
+
+    def add_record(self, record):
+        """Add a new record to the chart"""
+        if len(self.records) >= self.max_records:
+            self.records.pop(0)
+        self.records.append(record)
         self.update_chart()
-    
+
+    def clear_records(self):
+        """Remove all saved records"""
+        self.records.clear()
+        self.update_chart()
+
     def update_chart(self):
-        """Update the chart with current data"""
-        # Clear existing chart elements (not grid or axes)
-        self.delete("line", "point", "label", "legend")
-        
-        # Draw the legend regardless of whether we have data
+        """Redraw the bar chart with current records"""
+        self.delete("bar", "label", "legend", "value")
         self.draw_legend()
-        
-        if len(self.time_points) < 2:
-            # Draw time axis labels even if no data
-            if len(self.time_points) == 1:
-                self.draw_time_labels()
-            return  # Need at least 2 points to draw lines
-        
-        # Get the normalization factors for each data series
-        # We'll scale each series to fit within the chart height
-        max_energy = max(self.energy_points) if self.energy_points else 1
-        max_co2 = max(self.co2_points) if self.co2_points else 1
-        max_brass = max(self.brass_points) if self.brass_points else 1
-        max_plastic = max(self.plastic_points) if self.plastic_points else 1
-        max_cost = max(self.cost_points) if self.cost_points else 1
-        
-        # Time scale - divide chart width by number of time intervals
-        time_range = (self.time_points[-1] - self.time_points[0]).total_seconds()
-        if time_range == 0:
-            time_range = 1  # Avoid division by zero
-        
-        # Draw each data series
-        self.draw_series("energy", self.energy_points, max_energy, time_range)
-        self.draw_series("co2", self.co2_points, max_co2, time_range)
-        self.draw_series("brass", self.brass_points, max_brass, time_range)
-        self.draw_series("plastic", self.plastic_points, max_plastic, time_range)
-        self.draw_series("cost", self.cost_points, max_cost, time_range)
-        
-        # Draw time axis labels
-        self.draw_time_labels()
-    
-    def draw_series(self, name, data_points, max_value, time_range):
-        """Draw a single data series on the chart"""
+
+        if not self.records:
+            return
+
+        metrics = ["energy", "co2", "cost", "brass", "plastic"]
+        max_value = max(max(record[m] for m in metrics) for record in self.records)
         if max_value == 0:
-            max_value = 1  # Avoid division by zero
-        
-        points = []
-        for i, value in enumerate(data_points):
-            # Calculate x position based on time
-            time_fraction = (self.time_points[i] - self.time_points[0]).total_seconds() / time_range
-            x = self.margin_left + (time_fraction * self.chart_width)
-            
-            # Calculate y position based on value
-            value_fraction = value / max_value
-            y = self.height - self.margin_bottom - (value_fraction * self.chart_height)
-            
-            points.append((x, y))
-        
-        # Draw glow effect for line (subtle shadow)
-        if len(points) > 1:
-            for i in range(len(points) - 1):
-                self.create_line(
-                    points[i][0], points[i][1] + 2,
-                    points[i+1][0], points[i+1][1] + 2,
-                    fill="#ffffff", width=4, tags="line", smooth=True
+            max_value = 1
+
+        num_records = len(self.records)
+        group_width = self.chart_width / (num_records + 1)
+        bar_width = group_width / (len(metrics) + 1)
+
+        for i, record in enumerate(self.records):
+            x_center = self.margin_left + (i + 1) * group_width
+            for j, key in enumerate(metrics):
+                value = record[key]
+                bar_height = (value / max_value) * self.chart_height
+                if bar_height < 1 and value > 0:
+                    bar_height = 1
+                x0 = x_center - (len(metrics) / 2) * bar_width + j * bar_width
+                x1 = x0 + bar_width * 0.8
+                y1 = self.height - self.margin_bottom
+                y0 = y1 - bar_height
+                self.create_rectangle(
+                    x0, y0, x1, y1,
+                    fill=self.colors[key], outline="", tags="bar"
                 )
-        
-        # Draw lines connecting points
-        if len(points) > 1:
-            for i in range(len(points) - 1):
-                self.create_line(
-                    points[i][0], points[i][1],
-                    points[i+1][0], points[i+1][1],
-                    fill=self.colors[name], width=2, tags="line", smooth=True
+                self.create_text(
+                    (x0 + x1) / 2, y0 - 5,
+                    text=f"{value:.1f}", anchor="s",
+                    font=("Segoe UI", 8), tags="value", fill=COLORS["text"]
                 )
-        
-        # Draw points
-        for x, y in points:
-            # Draw point glow
-            self.create_oval(
-                x-5, y-5, x+5, y+5,
-                fill=self.colors[name], outline="", tags="point", stipple=""
+
+            self.create_text(
+                x_center, self.height - self.margin_bottom + 15,
+                text=record["label"], anchor="n", tags="label",
+                fill=COLORS["text_secondary"]
             )
-            # Draw center point
-            self.create_oval(
-                x-2, y-2, x+2, y+2,
-                fill="#ffffff", outline="", tags="point"
-            )
-    
+
+        # Draw scale on y-axis
+        self.create_text(
+            self.margin_left - 5, self.margin_top,
+            text=f"{max_value:.1f}", anchor="e", tags="value",
+            fill=COLORS["text_secondary"], font=("Segoe UI", 8)
+        )
+        self.create_text(
+            self.margin_left - 5, self.height - self.margin_bottom,
+            text="0", anchor="e", tags="value",
+            fill=COLORS["text_secondary"], font=("Segoe UI", 8)
+        )
+
     def draw_legend(self):
-        """Draw the chart legend vertically at the bottom-right corner"""
-        # Define items and their corresponding keys
+        """Draw the chart legend at the top-right corner"""
         items = [
             ("Energy (kWh)", "energy"),
             ("CO2 (kg)", "co2"),
+            ("Cost (EUR)", "cost"),
             ("Brass (kg)", "brass"),
             ("Plastic (kg)", "plastic"),
-            ("Cost (EUR)", "cost")
         ]
 
-        # Spacing and legend item size
         spacing = 22
         box_size = 10
-
-        # Calculate starting position: right bottom corner
-        legend_x = self.width - self.margin_right - 100  # Leave space from the right edge
-        legend_y = self.height - self.margin_bottom - len(items) * spacing  # Stack upward
+        legend_x = self.width - self.margin_right - 100
+        legend_y = self.margin_top
 
         for i, (label, key) in enumerate(items):
             y = legend_y + i * spacing
-
-            # Draw color box
             self.create_rectangle(
                 legend_x, y,
                 legend_x + box_size, y + box_size,
                 fill=self.colors[key], outline="", tags="legend"
             )
-
-            # Draw label
             self.create_text(
                 legend_x + box_size + 5, y + box_size // 2,
-                text=label, anchor="w", tags="legend", fill=COLORS["text"]
+                text=label, anchor="w", tags="legend",
+                fill=COLORS["text"]
             )
-
-    
-    def draw_time_labels(self):
-        """Draw time labels on the x-axis"""
-        if not self.time_points:
-            return
-        
-        # Draw start and end time
-        start_time = self.time_points[0].strftime("%H:%M:%S")
-        end_time = self.time_points[-1].strftime("%H:%M:%S")
-        
-        self.create_text(
-            self.margin_left, self.height - self.margin_bottom + 15,
-            text=start_time, anchor="n", tags="label", fill=COLORS["text_secondary"]
-        )
-        
-        self.create_text(
-            self.width - self.margin_right, self.height - self.margin_bottom + 15,
-            text=end_time, anchor="n", tags="label", fill=COLORS["text_secondary"]
-        )
 
 class CircularEconomyDashboard:
     def __init__(self, root):
@@ -715,18 +645,12 @@ class CircularEconomyDashboard:
         # Initialize energy mix factors and display
         self.update_energy_mix()
         
-        # Time series data for live graph
-        self.last_update_time = time.time()
-        
         # Initial calculation
         self.calculate_and_update()
-        
+
         # Create notebooks for calculation details and info (minimized)
         self.create_calculation_tabs()
-        
-        # Start timeseries update loop
-        self.update_timeseries()
-        
+
         # Fetch realtime price and schedule updates
         self.fetch_realtime_price()
     
@@ -807,28 +731,21 @@ class CircularEconomyDashboard:
         current_canvas2.create_rectangle(0, 0, 15, 15, fill=COLORS["material1"], outline="")
         
     def create_livegraph_panel(self):
-        """Create live graph panel"""
+        """Create panel for saving and comparing records"""
         livegraph_panel = ttk.LabelFrame(self.root, text="Live Metrics Visualization")
         livegraph_panel.pack(fill="x", padx=10, pady=(0, 10))
-        
-        # Create time series chart
-        self.timeseries_chart = TimeSeriesChart(livegraph_panel, width=1160, height=250)
-        self.timeseries_chart.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        # Create control panel
+
+        self.records_chart = RecordBarChart(livegraph_panel, width=1160, height=250)
+        self.records_chart.pack(fill="both", expand=True, padx=10, pady=10)
+
         control_frame = ttk.Frame(livegraph_panel)
         control_frame.pack(fill="x", padx=10, pady=(0, 10))
-        
-        # Add controls
-        ttk.Button(control_frame, text="Record Data Point", 
-                  command=self.record_data_point, style="Accent.TButton").pack(side="left", padx=(0, 10))
-        
-        self.auto_record_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(control_frame, text="Auto Record (every 0.5 seconds)", 
-                       variable=self.auto_record_var).pack(side="left")
-        
-        ttk.Button(control_frame, text="Clear Data", 
-                  command=self.clear_timeseries_data).pack(side="right")
+
+        ttk.Button(control_frame, text="Save Record",
+                   command=self.save_record, style="Accent.TButton").pack(side="left", padx=(0, 10))
+
+        ttk.Button(control_frame, text="Clear All Records",
+                   command=self.clear_records).pack(side="left")
     
     def create_calculation_tabs(self):
         """Create tabs for calculation details and info"""
@@ -1098,7 +1015,7 @@ Material Consumption:
 
 The dashboard compares the baseline scenario (0% reuse, 0% recycle, USA energy) with your current settings.
 
-The Live Graph tab shows how metrics change over time as you adjust the parameters, updating every 0.5 seconds.
+The Live Metrics Visualization panel lets you save up to three records and compare their energy, cost, CO₂, brass, and plastic values.
 """
         
         # Create a text widget for the info content
@@ -1357,60 +1274,44 @@ The Live Graph tab shows how metrics change over time as you adjust the paramete
                 ["kg", "kg"]  # Units for materials
             )
             
-            # Record a data point for the live graph if auto-record is enabled
-            if self.auto_record_var.get():
-                self.record_data_point()
             
         except Exception as e:
             print(f"Error in calculation: {e}")
-    
-    def record_data_point(self):
-        """Manually record a data point for the time series graph"""
-        # Get current metrics
-        cover_reuse = float(self.cover_var.get())
-        impeller_reuse = float(self.impeller_var.get())
-        housing_reuse = float(self.housing_var.get())
-        material_recycling = float(self.material_recycling_var.get())
-        
-        # Calculate current metrics
-        current_metrics = self.calculate_metrics(cover_reuse, impeller_reuse, housing_reuse, material_recycling, None, self.factors)
-        
-        # Add to time series chart
-        self.timeseries_chart.add_data_point(
-            current_metrics['energy'],
-            current_metrics['co2'],
-            current_metrics['brass'],
-            current_metrics['plastic'],
-            current_metrics['component_cost'] + current_metrics['energy_cost']
+    def save_record(self):
+        """Save the current metrics as a record"""
+        cover_reuse = int(self.cover_var.get())
+        impeller_reuse = int(self.impeller_var.get())
+        housing_reuse = int(self.housing_var.get())
+        recycle_pct = int(self.material_recycling_var.get())
+
+        current_metrics = self.calculate_metrics(
+            cover_reuse,
+            impeller_reuse,
+            housing_reuse,
+            recycle_pct,
+            None,
+            self.factors,
         )
-    
-    def clear_timeseries_data(self):
-        """Clear all data points from the time series graph"""
-        # Clear the data collections
-        self.timeseries_chart.time_points.clear()
-        self.timeseries_chart.energy_points.clear()
-        self.timeseries_chart.co2_points.clear()
-        self.timeseries_chart.brass_points.clear()
-        self.timeseries_chart.plastic_points.clear()
-        self.timeseries_chart.cost_points.clear()
-        
-        # Redraw the chart
-        self.timeseries_chart.update_chart()
-    
-    def update_timeseries(self):
-        """Check if it's time to update the time series graph"""
-        current_time = time.time()
-        
-        # Auto-record a data point every 2(0.5) seconds
-        if self.auto_record_var.get() and (current_time - self.last_update_time >= 2):
-            self.record_data_point()
-            self.last_update_time = current_time
-        
-        # Schedule the next check
-        self.root.after(100, self.update_timeseries)  # Check more frequently for smoother updates
 
+        record = {
+            "label": f"Record {len(self.records_chart.records) + 1}",
+            "reuse_cover": cover_reuse,
+            "reuse_impeller": impeller_reuse,
+            "reuse_housing": housing_reuse,
+            "recycle_cover": recycle_pct,
+            "recycle_impeller": recycle_pct,
+            "recycle_housing": recycle_pct,
+            "energy": current_metrics['energy'],
+            "co2": current_metrics['co2'],
+            "brass": current_metrics['brass'],
+            "plastic": current_metrics['plastic'],
+            "cost": current_metrics['component_cost'] + current_metrics['energy_cost'],
+        }
+        self.records_chart.add_record(record)
 
-
+    def clear_records(self):
+        """Clear all saved records"""
+        self.records_chart.clear_records()
 
     def fetch_realtime_price(self):
         """按当地时区取德国日内 24 小时平均电价，并更新界面"""
