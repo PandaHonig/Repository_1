@@ -103,6 +103,8 @@ MARGIN_BOTTOM       = 28 if COMPACT else 40
 LEGEND_SPACING      = 18 if COMPACT else 22
 LEGEND_BOX          = 10
 
+SHOW_CALC_TABS = False
+
 class CircularControl(tk.Canvas):
     """A futuristic circular control for setting percentage values"""
     
@@ -716,7 +718,8 @@ class CircularEconomyDashboard:
         self.calculate_and_update()
 
         # Create notebooks for calculation details and info (minimized)
-        self.create_calculation_tabs()
+        if SHOW_CALC_TABS:
+            self.create_calculation_tabs()
 
         # Fetch realtime price and schedule updates
         self.fetch_realtime_price()
