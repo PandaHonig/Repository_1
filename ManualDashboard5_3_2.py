@@ -77,6 +77,32 @@ COLORS = {
     "material2": "#9C27B0"       # Purple for plastic
 }
 
+# --- Compact sizing (no autoscale) ---
+COMPACT = True
+
+GAUGE_RADIUS        = 45 if COMPACT else 55   # 左侧 6 个圆形控件半径（原 55）
+CHART_H_METRICS     = 240 if COMPACT else 300 # 右上图表高度（原 300）
+CHART_H_MATERIALS   = 210 if COMPACT else 270 # 右中图表高度（原 270）
+CHART_H_SCENARIO    = 170 if COMPACT else 250 # 右下场景记录高度（原 250）
+CHART_W_SCENARIO    = 750 if COMPACT else 900 # 场景记录画布宽度（原先实例化 1160）
+
+PAD_X               = 10 if COMPACT else 12   # 通用水平内边距
+PAD_Y_SMALL         = 4                        # 行内/图例间距
+PAD_Y_PANEL         = 8                        # 面板之间的垂直间距
+
+TITLE_FONT_SIZE     = 12 if COMPACT else 14
+SUBTITLE_FONT_SIZE  = 10 if COMPACT else 11
+SECTION_FONT_SIZE   = 9  if COMPACT else 10
+VALUE_FONT_SIZE     = 9
+
+# 压缩图表边距与图例密度
+MARGIN_LEFT         = 46 if COMPACT else 50
+MARGIN_RIGHT        = 16 if COMPACT else 20
+MARGIN_TOP          = 16 if COMPACT else 20
+MARGIN_BOTTOM       = 34 if COMPACT else 40
+LEGEND_SPACING      = 18 if COMPACT else 22
+LEGEND_BOX          = 10
+
 class CircularControl(tk.Canvas):
     """A futuristic circular control for setting percentage values"""
     
@@ -245,10 +271,10 @@ class FuturisticStyle:
         style.configure("Panel.TLabel", background=COLORS["bg_medium"], foreground=COLORS["text"])
         
         # Special styles
-        style.configure("Title.TLabel", font=("Segoe UI", 14, "bold"), foreground=COLORS["text"], background=COLORS["bg_dark"])
-        style.configure("Subtitle.TLabel", font=("Segoe UI", 11, "bold"), foreground=COLORS["text"], background=COLORS["bg_medium"])
-        style.configure("Section.TLabel", font=("Segoe UI", 10, "bold"), foreground=COLORS["text"], background=COLORS["bg_medium"])
-        style.configure("Value.TLabel", font=("Segoe UI", 9, "bold"), foreground=COLORS["text"], background=COLORS["bg_medium"])
+        style.configure("Title.TLabel",    font=("Segoe UI", TITLE_FONT_SIZE, "bold"),    foreground=COLORS["text"], background=COLORS["bg_dark"])
+        style.configure("Subtitle.TLabel", font=("Segoe UI", SUBTITLE_FONT_SIZE, "bold"), foreground=COLORS["text"], background=COLORS["bg_medium"])
+        style.configure("Section.TLabel",  font=("Segoe UI", SECTION_FONT_SIZE, "bold"),  foreground=COLORS["text"], background=COLORS["bg_medium"])
+        style.configure("Value.TLabel",    font=("Segoe UI", VALUE_FONT_SIZE, "bold"),    foreground=COLORS["text"], background=COLORS["bg_medium"])
         style.configure("Accent.TLabel", foreground=COLORS["accent"], background=COLORS["bg_medium"])
         
         # Configure checkbox
@@ -325,10 +351,8 @@ class FuturisticChart(tk.Canvas):
         
         self.width = width
         self.height = height
-        self.margin_left = 50
-        self.margin_right = 20
-        self.margin_top = 20
-        self.margin_bottom = 40
+        self.margin_left, self.margin_right = MARGIN_LEFT, MARGIN_RIGHT
+        self.margin_top,  self.margin_bottom = MARGIN_TOP, MARGIN_BOTTOM
         self.chart_width = width - self.margin_left - self.margin_right
         self.chart_height = height - self.margin_top - self.margin_bottom
         
@@ -593,8 +617,8 @@ class RecordBarChart(FuturisticChart):
             ("Plastic (kg)", "plastic"),
         ]
 
-        spacing = 22
-        box_size = 10
+        spacing = LEGEND_SPACING
+        box_size = LEGEND_BOX
         legend_x = self.width - self.margin_right - 100
         legend_y = self.margin_top
 
@@ -709,15 +733,15 @@ class CircularEconomyDashboard:
         """Create visualization panels for metrics and materials"""
         # Create metrics panel
         metrics_panel = ttk.LabelFrame(self.viz_column, text="Metrics Comparison", style="TLabelframe")
-        metrics_panel.pack(fill="both", expand=True, pady=(0, 10))
-        
+        metrics_panel.pack(fill="both", expand=True, pady=(0, PAD_Y_PANEL))
+
         # Create metrics chart
-        self.metrics_chart = ComparisonChart(metrics_panel, width=550, height=300)
-        self.metrics_chart.pack(fill="both", expand=True, padx=10, pady=10)
-        
+        self.metrics_chart = ComparisonChart(metrics_panel, width=550, height=CHART_H_METRICS)
+        self.metrics_chart.pack(fill="both", expand=True, padx=PAD_X, pady=(0, PAD_Y_SMALL))
+
         # Create metrics legend
         metrics_legend_frame = ttk.Frame(metrics_panel, style="Panel.TFrame")
-        metrics_legend_frame.pack(pady=5)
+        metrics_legend_frame.pack(pady=(0, PAD_Y_PANEL))
         
         # Create legend items
         baseline_frame = ttk.Frame(metrics_legend_frame, width=15, height=15, style="Panel.TFrame")
@@ -742,15 +766,15 @@ class CircularEconomyDashboard:
         
         # Create materials panel
         materials_panel = ttk.LabelFrame(self.viz_column, text="Materials Breakdown", style="TLabelframe")
-        materials_panel.pack(fill="both", expand=True)
-        
+        materials_panel.pack(fill="both", expand=True, pady=(0, PAD_Y_PANEL))
+
         # Create materials chart with reduced height to make room for legend
-        self.materials_chart = ComparisonChart(materials_panel, width=550, height=270)
-        self.materials_chart.pack(fill="both", expand=True, padx=10, pady=(10, 5))
-        
+        self.materials_chart = ComparisonChart(materials_panel, width=550, height=CHART_H_MATERIALS)
+        self.materials_chart.pack(fill="both", expand=True, padx=PAD_X, pady=(0, PAD_Y_SMALL))
+
         # Create materials legend with more space
         materials_legend_frame = ttk.Frame(materials_panel, style="Panel.TFrame")
-        materials_legend_frame.pack(fill="x", pady=(0, 20))  # Added more bottom padding
+        materials_legend_frame.pack(fill="x", pady=(0, PAD_Y_PANEL))
         
         # Create legend items - reuse same style as metrics legend
         baseline_frame2 = ttk.Frame(materials_legend_frame, width=15, height=15, style="Panel.TFrame")
@@ -776,18 +800,18 @@ class CircularEconomyDashboard:
     def create_livegraph_panel(self):
         """Create panel for saving and comparing records"""
         # old version:  Live Metrics Visualization
-        livegraph_panel = ttk.LabelFrame(self.root, text="Scenario Comparison") 
-        livegraph_panel.pack(fill="x", padx=10, pady=(0, 10))
+        livegraph_panel = ttk.LabelFrame(self.viz_column, text="Scenario Comparison")
+        livegraph_panel.pack(fill="both", expand=False, pady=(0, PAD_Y_PANEL))
 
         control_frame = ttk.Frame(livegraph_panel)
-        control_frame.pack(side="top", fill="x", padx=10, pady=(0, 5))
+        control_frame.pack(side="top", fill="x", padx=PAD_X, pady=(0, PAD_Y_SMALL))
 
         ttk.Button(
             control_frame,
             text="Save Record",
             command=self.save_record,
             style="CyberDark.TButton",
-        ).pack(side="left", padx=(0, 10))
+        ).pack(side="left", padx=(0, PAD_X))
 
         ttk.Button(
             control_frame,
@@ -795,12 +819,13 @@ class CircularEconomyDashboard:
             command=self.clear_records,
             style="CyberDark.TButton",
         ).pack(side="left")
-        
-        self.records_chart = RecordBarChart(livegraph_panel, width=1160, height=250)
-        #self.records_chart.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.records_chart = RecordBarChart(
+            livegraph_panel, width=CHART_W_SCENARIO, height=CHART_H_SCENARIO, max_records=3
+        )
         self.records_chart.pack(
-        side="top", fill="both", expand=True, padx=10, pady=(0, 10)
-            )
+            side="top", fill="both", expand=True, padx=PAD_X, pady=(0, PAD_Y_PANEL)
+        )
     
     def create_calculation_tabs(self):
         """Create tabs for calculation details and info"""
@@ -838,7 +863,7 @@ class CircularEconomyDashboard:
             reuse_frame,
             self.cover_var,
             label="Cover",
-            radius=55,
+            radius=GAUGE_RADIUS,
             callback=self.calculate_and_update
         )
         cover_control.pack(side="left", padx=10)
@@ -847,7 +872,7 @@ class CircularEconomyDashboard:
             reuse_frame,
             self.impeller_var,
             label="Impeller",
-            radius=55,
+            radius=GAUGE_RADIUS,
             callback=self.calculate_and_update
         )
         impeller_control.pack(side="left", padx=10)
@@ -856,7 +881,7 @@ class CircularEconomyDashboard:
             reuse_frame,
             self.housing_var,
             label="Housing",
-            radius=55,
+            radius=GAUGE_RADIUS,
             callback=self.calculate_and_update
         )
         housing_control.pack(side="left", padx=10)
@@ -872,7 +897,7 @@ class CircularEconomyDashboard:
             recycle_frame,
             self.recycle_cover_var,
             label="Cover",
-            radius=55,
+            radius=GAUGE_RADIUS,
             callback=self.calculate_and_update
         )
         recycle_cover_control.pack(side="left", padx=10)
@@ -881,7 +906,7 @@ class CircularEconomyDashboard:
             recycle_frame,
             self.recycle_impeller_var,
             label="Impeller",
-            radius=55,
+            radius=GAUGE_RADIUS,
             callback=self.calculate_and_update
         )
         recycle_impeller_control.pack(side="left", padx=10)
@@ -890,7 +915,7 @@ class CircularEconomyDashboard:
             recycle_frame,
             self.recycle_housing_var,
             label="Housing",
-            radius=55,
+            radius=GAUGE_RADIUS,
             callback=self.calculate_and_update
         )
         recycle_housing_control.pack(side="left", padx=10)
