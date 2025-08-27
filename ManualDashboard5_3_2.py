@@ -557,6 +557,12 @@ class RecordBarChart(FuturisticChart):
         """Initialize the chart"""
         super().__init__(parent, width, height)
 
+        if self.margin_bottom < 32:
+            self.margin_bottom = 32
+            self.chart_height = self.height - self.margin_top - self.margin_bottom
+            self.delete("grid", "axis")
+            self.draw_grid()
+
         self.max_records = max_records
         self.records = []
         self.colors = {
@@ -584,9 +590,9 @@ class RecordBarChart(FuturisticChart):
     def update_chart(self):
         """Redraw the bar chart with current records"""
         self.delete("bar", "label", "legend", "value")
-        self.draw_legend()
 
         if not self.records:
+            self.draw_legend()
             return
 
         metrics = ["energy", "co2", "cost", "brass", "plastic"]
@@ -620,7 +626,7 @@ class RecordBarChart(FuturisticChart):
                 )
 
             self.create_text(
-                x_center, self.height - self.margin_bottom + 15,
+                x_center, self.height - self.margin_bottom + 10,
                 text=record["label"], anchor="n", tags="label",
                 fill=COLORS["text_secondary"]
             )
@@ -636,6 +642,8 @@ class RecordBarChart(FuturisticChart):
             text="0", anchor="e", tags="value",
             fill=COLORS["text_secondary"], font=("Segoe UI", 8)
         )
+
+        self.draw_legend()
 
     def draw_legend(self):
         """Draw the chart legend at the top-right corner"""
