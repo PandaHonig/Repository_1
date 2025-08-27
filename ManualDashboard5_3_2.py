@@ -9,6 +9,7 @@ Baseline: 0 % reuse, 0 % recycle, 100 % fossil (worst-case scenario)
 
 import tkinter as tk
 from tkinter import ttk
+from tkinter import font as tkfont
 import math
 import requests
 import xml.etree.ElementTree as ET
@@ -77,12 +78,22 @@ COLORS = {
     "material2": "#9C27B0"       # Purple for plastic
 }
 
-class CircularControl(tk.Canvas):
+class DashboardMixin:
+    """Helper mixin to locate the dashboard instance in widget hierarchy."""
+
+    def _find_dashboard_instance(self, widget):
+        while widget is not None:
+            if isinstance(widget, CircularEconomyDashboard):
+                return widget
+            widget = getattr(widget, "master", None)
+        return None
+
+class CircularControl(tk.Canvas, DashboardMixin):
     """A futuristic circular control for setting percentage values"""
-    
-    def __init__(self, parent, variable, label="", radius=50, callback=None, **kwargs):
+
+    def __init__(self, parent, variable, label="", base_radius=55, callback=None, **kwargs):
         """Initialize the circular control
-        
+
         Parameters:
         -----------
         parent : tkinter widget
@@ -91,15 +102,19 @@ class CircularControl(tk.Canvas):
             The variable to control
         label : str
             The label for the control
-        radius : int
-            The radius of the circular control
+        base_radius : int
+            The base radius of the circular control
         callback : function
             Function to call when value changes
         """
+        dashboard = self._find_dashboard_instance(parent)
+        self.radius = max(30, int(base_radius * dashboard.scale)) if dashboard else base_radius
+        self.font_size = max(8, int(12 * dashboard.scale)) if dashboard else 12
+        self.label_font_size = max(7, int(9 * dashboard.scale)) if dashboard else 9
+
         # Calculate dimensions
-        self.radius = radius
-        self.width = radius * 2 + 20
-        self.height = radius * 2 + 40  # Extra space for label
+        self.width = self.radius * 2 + 20
+        self.height = self.radius * 2 + 40  # Extra space for label
         
         # Get parent background color if not specified
         if 'bg' not in kwargs:
@@ -166,15 +181,15 @@ class CircularControl(tk.Canvas):
         
         # Draw value text
         self.create_text(
-            cx, cy, text=f"{int(value)}%", 
-            fill=self.text_color, font=("Segoe UI", 12, "bold"),
+            cx, cy, text=f"{int(value)}%",
+            fill=self.text_color, font=("Segoe UI", self.font_size, "bold"),
             tags="value"
         )
-        
+
         # Draw label
         self.create_text(
             cx, self.height - 15, text=self.label,
-            fill=self.text_color, font=("Segoe UI", 9),
+            fill=self.text_color, font=("Segoe UI", self.label_font_size),
             tags="label"
         )
     
@@ -315,7 +330,7 @@ class FuturisticStyle:
               {"sticky": "nswe",
                "children": [("Button.label", {"sticky": "nswe"})]})]
         )
-class FuturisticChart(tk.Canvas):
+class FuturisticChart(tk.Canvas, DashboardMixin):
     """A futuristic styled chart"""
     
     def __init__(self, parent, width=400, height=200, bg=COLORS["chart_bg"]):
@@ -370,31 +385,42 @@ class FuturisticChart(tk.Canvas):
 
 class ComparisonChart(FuturisticChart):
     """A futuristic bar chart for comparing baseline vs current values"""
-    
-    def __init__(self, parent, width=550, height=300):
-        """Initialize the chart"""
-        super().__init__(parent, width, height)
+
+    def __init__(self, parent, target_width=550, target_height=300):
+        """Initialize the chart with adaptive scaling"""
+        dashboard = self._find_dashboard_instance(parent)
+        if dashboard:
+            actual_width = max(300, int(target_width * dashboard.scale))
+            actual_height = max(200, int(target_height * dashboard.scale))
+        else:
+            actual_width, actual_height = target_width, target_height
+
+        super().__init__(parent, actual_width, actual_height)
         self.baseline_color = COLORS["negative"]
         self.current_color = COLORS["metric1"]
+        self._last_data = None
+        self.bind_resize_event(parent)
     
     def update_chart(self, categories, baseline_values, current_values, colors=None, units=None):
         """Update the chart with new data"""
+        self._last_data = (categories, baseline_values, current_values, colors, units)
+
         # Clear existing chart elements (not grid or axes)
         self.delete("bar", "label", "value", "unit")
-        
+
         if not categories or not baseline_values or not current_values:
             return
-        
+
         # Set colors if provided
         if colors:
             if len(colors) >= 2:
                 self.baseline_color = colors[0]
                 self.current_color = colors[1]
-        
+
         # Default units if not provided
         if not units:
             units = [""] * len(categories)
-        
+
         # Find the maximum value for scaling
         max_value = max(max(baseline_values), max(current_values))
         if max_value == 0:
@@ -496,12 +522,38 @@ class ComparisonChart(FuturisticChart):
             fill=COLORS["text_secondary"], font=("Segoe UI", 8)
         )
 
+    def bind_resize_event(self, parent):
+        def on_resize(event):
+            if event.widget == parent:
+                new_width = max(300, event.width - 20)
+                new_height = max(200, event.height - 60)
+                self.config(width=new_width, height=new_height)
+                self.width = new_width
+                self.height = new_height
+                self.chart_width = self.width - self.margin_left - self.margin_right
+                self.chart_height = self.height - self.margin_top - self.margin_bottom
+                self.delete("grid", "axis")
+                self.draw_grid()
+                self.redraw_chart()
+        parent.bind("<Configure>", on_resize)
+
+    def redraw_chart(self):
+        if self._last_data:
+            self.update_chart(*self._last_data)
+
 class RecordBarChart(FuturisticChart):
     """A chart showing up to three saved records as grouped bars"""
 
-    def __init__(self, parent, width=900, height=250, max_records=3):
-        """Initialize the chart"""
-        super().__init__(parent, width, height)
+    def __init__(self, parent, target_width=900, target_height=250, max_records=3):
+        """Initialize the chart with adaptive scaling"""
+        dashboard = self._find_dashboard_instance(parent)
+        if dashboard:
+            actual_width = max(300, int(target_width * dashboard.scale))
+            actual_height = max(200, int(target_height * dashboard.scale))
+        else:
+            actual_width, actual_height = target_width, target_height
+
+        super().__init__(parent, actual_width, actual_height)
 
         self.max_records = max_records
         self.records = []
@@ -513,6 +565,7 @@ class RecordBarChart(FuturisticChart):
             "plastic": COLORS["material2"],
         }
 
+        self.bind_resize_event(parent)
         self.update_chart()
 
     def add_record(self, record):
@@ -583,6 +636,24 @@ class RecordBarChart(FuturisticChart):
             fill=COLORS["text_secondary"], font=("Segoe UI", 8)
         )
 
+    def bind_resize_event(self, parent):
+        def on_resize(event):
+            if event.widget == parent:
+                new_width = max(300, event.width - 20)
+                new_height = max(200, event.height - 60)
+                self.config(width=new_width, height=new_height)
+                self.width = new_width
+                self.height = new_height
+                self.chart_width = self.width - self.margin_left - self.margin_right
+                self.chart_height = self.height - self.margin_top - self.margin_bottom
+                self.delete("grid", "axis")
+                self.draw_grid()
+                self.redraw_chart()
+        parent.bind("<Configure>", on_resize)
+
+    def redraw_chart(self):
+        self.update_chart()
+
     def draw_legend(self):
         """Draw the chart legend at the top-right corner"""
         items = [
@@ -612,41 +683,66 @@ class RecordBarChart(FuturisticChart):
             )
 
 class CircularEconomyDashboard:
+    BASE_W, BASE_H = 1366, 900
+    MIN_SCALE, MAX_SCALE = 0.6, 1.0
+
+    def calc_scale(self):
+        sw = self.root.winfo_screenwidth()
+        sh = self.root.winfo_screenheight()
+        scale = min(sw / self.BASE_W, sh / self.BASE_H)
+        return max(self.MIN_SCALE, min(self.MAX_SCALE, scale))
+
+    def apply_scale(self):
+        self.PAD = max(5, int(10 * self.scale))
+        self.GAUGE_RADIUS = max(30, int(55 * self.scale))
+        self.CHART_WIDTH = max(400, int(550 * self.scale))
+        self.CHART_HEIGHT_METRICS = max(200, int(300 * self.scale))
+        self.CHART_HEIGHT_MATERIALS = max(180, int(270 * self.scale))
+        self.CHART_HEIGHT_SCENARIO = max(160, int(250 * self.scale))
+
+        default_font = tkfont.nametofont("TkDefaultFont")
+        default_font.configure(size=max(8, int(9 * self.scale)))
+
+        self.compact_mode = self.scale < 0.8
+
     def __init__(self, root):
         self.root = root
         self.root.title("Circular Economy Dashboard")
         self.root.geometry("1200x800")
         self.root.configure(bg=COLORS["bg_dark"])
-        
+
+        self.scale = self.calc_scale()
+        self.apply_scale()
+
         # Apply futuristic styling
         FuturisticStyle.configure_styles()
-        
+
         # Create main container
         main_container = ttk.Frame(root)
-        main_container.pack(fill="both", expand=True, padx=10, pady=10)
-        
+        main_container.pack(fill="both", expand=True, padx=self.PAD, pady=self.PAD)
+
         # Create top frame for header
         header_frame = ttk.Frame(main_container)
-        header_frame.pack(fill="x", pady=(0, 10))
+        header_frame.pack(fill="x", pady=(0, self.PAD))
         
         ttk.Label(header_frame, text="Circular Economy Dashboard", style="Title.TLabel").pack(side="left")
         
         # Create content frame with two columns
         content_frame = ttk.Frame(main_container)
         content_frame.pack(fill="both", expand=True)
-        
+
         # Left column for inputs
         self.input_column = ttk.Frame(content_frame)
-        self.input_column.pack(side="left", fill="both", padx=(0, 10))
-        
+        self.input_column.pack(side="left", fill="both", padx=(0, self.PAD))
+
         # Right column for visualizations
         self.viz_column = ttk.Frame(content_frame)
         self.viz_column.pack(side="left", fill="both", expand=True)
-        
+
         # Create panels
         self.create_input_panel()
         self.create_visualization_panels()
-        self.create_livegraph_panel()
+        self.create_scenario_panel()
         
         # Create input variables
         self.cover_var = tk.DoubleVar(value=0)
@@ -706,88 +802,86 @@ class CircularEconomyDashboard:
         self.input_panel = input_panel
     
     def create_visualization_panels(self):
-        """Create visualization panels for metrics and materials"""
-        # Create metrics panel
-        metrics_panel = ttk.LabelFrame(self.viz_column, text="Metrics Comparison", style="TLabelframe")
-        metrics_panel.pack(fill="both", expand=True, pady=(0, 10))
-        
-        # Create metrics chart
-        self.metrics_chart = ComparisonChart(metrics_panel, width=550, height=300)
-        self.metrics_chart.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        # Create metrics legend
+        """Create visualization panels for metrics, materials and scenarios"""
+        self.viz_column.grid_rowconfigure(0, weight=38)
+        self.viz_column.grid_rowconfigure(1, weight=30)
+        self.viz_column.grid_rowconfigure(2, weight=32)
+        self.viz_column.grid_columnconfigure(0, weight=1)
+
+        # Metrics panel
+        metrics_panel = ttk.LabelFrame(self.viz_column, text="Metrics Comparison")
+        metrics_panel.grid(row=0, column=0, sticky="nsew", padx=self.PAD//2, pady=(0, self.PAD//2))
+        self.metrics_panel = metrics_panel
+
+        self.metrics_chart = ComparisonChart(metrics_panel)
+        self.metrics_chart.pack(fill="both", expand=True, padx=self.PAD, pady=self.PAD)
+
         metrics_legend_frame = ttk.Frame(metrics_panel, style="Panel.TFrame")
-        metrics_legend_frame.pack(pady=5)
-        
-        # Create legend items
+        metrics_legend_frame.pack(pady=self.PAD//2)
+
         baseline_frame = ttk.Frame(metrics_legend_frame, width=15, height=15, style="Panel.TFrame")
         baseline_frame.grid(row=0, column=0, padx=5)
         baseline_label = ttk.Label(metrics_legend_frame, text="Baseline", style="Panel.TLabel")
         baseline_label.grid(row=0, column=1, padx=(0, 15))
-        
-        baseline_canvas = tk.Canvas(baseline_frame, width=15, height=15, bg=COLORS["bg_medium"], 
-                                   highlightthickness=0)
+
+        baseline_canvas = tk.Canvas(baseline_frame, width=15, height=15, bg=COLORS["bg_medium"], highlightthickness=0)
         baseline_canvas.pack(fill="both", expand=True)
         baseline_canvas.create_rectangle(0, 0, 15, 15, fill=COLORS["negative"], outline="")
-        
+
         current_frame = ttk.Frame(metrics_legend_frame, width=15, height=15, style="Panel.TFrame")
         current_frame.grid(row=0, column=2, padx=5)
         current_label = ttk.Label(metrics_legend_frame, text="Current", style="Panel.TLabel")
         current_label.grid(row=0, column=3, padx=5)
-        
-        current_canvas = tk.Canvas(current_frame, width=15, height=15, bg=COLORS["bg_medium"], 
-                                   highlightthickness=0)
+
+        current_canvas = tk.Canvas(current_frame, width=15, height=15, bg=COLORS["bg_medium"], highlightthickness=0)
         current_canvas.pack(fill="both", expand=True)
         current_canvas.create_rectangle(0, 0, 15, 15, fill=COLORS["metric1"], outline="")
-        
-        # Create materials panel
-        materials_panel = ttk.LabelFrame(self.viz_column, text="Materials Breakdown", style="TLabelframe")
-        materials_panel.pack(fill="both", expand=True)
-        
-        # Create materials chart with reduced height to make room for legend
-        self.materials_chart = ComparisonChart(materials_panel, width=550, height=270)
-        self.materials_chart.pack(fill="both", expand=True, padx=10, pady=(10, 5))
-        
-        # Create materials legend with more space
+
+        # Materials panel
+        materials_panel = ttk.LabelFrame(self.viz_column, text="Materials Breakdown")
+        materials_panel.grid(row=1, column=0, sticky="nsew", padx=self.PAD//2, pady=self.PAD//2)
+        self.materials_panel = materials_panel
+
+        self.materials_chart = ComparisonChart(materials_panel, target_height=270)
+        self.materials_chart.pack(fill="both", expand=True, padx=self.PAD, pady=(self.PAD, self.PAD//2))
+
         materials_legend_frame = ttk.Frame(materials_panel, style="Panel.TFrame")
-        materials_legend_frame.pack(fill="x", pady=(0, 20))  # Added more bottom padding
-        
-        # Create legend items - reuse same style as metrics legend
+        materials_legend_frame.pack(fill="x", pady=(0, self.PAD*2))
+
         baseline_frame2 = ttk.Frame(materials_legend_frame, width=15, height=15, style="Panel.TFrame")
         baseline_frame2.grid(row=0, column=0, padx=5)
         baseline_label2 = ttk.Label(materials_legend_frame, text="Baseline", style="Panel.TLabel")
         baseline_label2.grid(row=0, column=1, padx=(0, 15))
-        
-        baseline_canvas2 = tk.Canvas(baseline_frame2, width=15, height=15, bg=COLORS["bg_medium"], 
-                                   highlightthickness=0)
+
+        baseline_canvas2 = tk.Canvas(baseline_frame2, width=15, height=15, bg=COLORS["bg_medium"], highlightthickness=0)
         baseline_canvas2.pack(fill="both", expand=True)
         baseline_canvas2.create_rectangle(0, 0, 15, 15, fill=COLORS["negative"], outline="")
-        
+
         current_frame2 = ttk.Frame(materials_legend_frame, width=15, height=15, style="Panel.TFrame")
         current_frame2.grid(row=0, column=2, padx=5)
         current_label2 = ttk.Label(materials_legend_frame, text="Current", style="Panel.TLabel")
         current_label2.grid(row=0, column=3, padx=5)
-        
-        current_canvas2 = tk.Canvas(current_frame2, width=15, height=15, bg=COLORS["bg_medium"], 
-                                   highlightthickness=0)
+
+        current_canvas2 = tk.Canvas(current_frame2, width=15, height=15, bg=COLORS["bg_medium"], highlightthickness=0)
         current_canvas2.pack(fill="both", expand=True)
         current_canvas2.create_rectangle(0, 0, 15, 15, fill=COLORS["material1"], outline="")
-        
-    def create_livegraph_panel(self):
-        """Create panel for saving and comparing records"""
-        # old version:  Live Metrics Visualization
-        livegraph_panel = ttk.LabelFrame(self.root, text="Scenario Comparison") 
-        livegraph_panel.pack(fill="x", padx=10, pady=(0, 10))
 
-        control_frame = ttk.Frame(livegraph_panel)
-        control_frame.pack(side="top", fill="x", padx=10, pady=(0, 5))
+        # Scenario panel placeholder
+        scenario_panel = ttk.LabelFrame(self.viz_column, text="Scenario Comparison")
+        scenario_panel.grid(row=2, column=0, sticky="nsew", padx=self.PAD//2, pady=(self.PAD//2, 0))
+        self.scenario_panel = scenario_panel
+        
+    def create_scenario_panel(self):
+        """Create panel for saving and comparing records"""
+        control_frame = ttk.Frame(self.scenario_panel)
+        control_frame.pack(side="top", fill="x", padx=self.PAD, pady=(0, self.PAD//2))
 
         ttk.Button(
             control_frame,
             text="Save Record",
             command=self.save_record,
             style="CyberDark.TButton",
-        ).pack(side="left", padx=(0, 10))
+        ).pack(side="left", padx=(0, self.PAD))
 
         ttk.Button(
             control_frame,
@@ -795,12 +889,9 @@ class CircularEconomyDashboard:
             command=self.clear_records,
             style="CyberDark.TButton",
         ).pack(side="left")
-        
-        self.records_chart = RecordBarChart(livegraph_panel, width=1160, height=250)
-        #self.records_chart.pack(fill="both", expand=True, padx=10, pady=10)
-        self.records_chart.pack(
-        side="top", fill="both", expand=True, padx=10, pady=(0, 10)
-            )
+
+        self.records_chart = RecordBarChart(self.scenario_panel, target_width=550, target_height=250)
+        self.records_chart.pack(side="top", fill="both", expand=True, padx=self.PAD, pady=(0, self.PAD))
     
     def create_calculation_tabs(self):
         """Create tabs for calculation details and info"""
@@ -829,81 +920,81 @@ class CircularEconomyDashboard:
         
         # Reuse controls
         ttk.Label(self.input_panel, text="Component Reusability",
-                 style="Section.TLabel").pack(pady=(10, 5))
+                 style="Section.TLabel").pack(pady=(self.PAD, self.PAD//2))
 
         reuse_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
-        reuse_frame.pack(fill="x", pady=5, padx=10)
+        reuse_frame.pack(fill="x", pady=self.PAD//2, padx=self.PAD)
 
         cover_control = CircularControl(
             reuse_frame,
             self.cover_var,
             label="Cover",
-            radius=55,
+            base_radius=self.GAUGE_RADIUS,
             callback=self.calculate_and_update
         )
-        cover_control.pack(side="left", padx=10)
+        cover_control.pack(side="left", padx=self.PAD)
 
         impeller_control = CircularControl(
             reuse_frame,
             self.impeller_var,
             label="Impeller",
-            radius=55,
+            base_radius=self.GAUGE_RADIUS,
             callback=self.calculate_and_update
         )
-        impeller_control.pack(side="left", padx=10)
+        impeller_control.pack(side="left", padx=self.PAD)
 
         housing_control = CircularControl(
             reuse_frame,
             self.housing_var,
             label="Housing",
-            radius=55,
+            base_radius=self.GAUGE_RADIUS,
             callback=self.calculate_and_update
         )
-        housing_control.pack(side="left", padx=10)
+        housing_control.pack(side="left", padx=self.PAD)
 
         # Recycling controls
         ttk.Label(self.input_panel, text="Component Recycling",
-                 style="Section.TLabel").pack(pady=(15, 5))
+                 style="Section.TLabel").pack(pady=(self.PAD, self.PAD//2))
 
         recycle_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
-        recycle_frame.pack(fill="x", pady=5, padx=10)
+        recycle_frame.pack(fill="x", pady=self.PAD//2, padx=self.PAD)
 
         recycle_cover_control = CircularControl(
             recycle_frame,
             self.recycle_cover_var,
             label="Cover",
-            radius=55,
+            base_radius=self.GAUGE_RADIUS,
             callback=self.calculate_and_update
         )
-        recycle_cover_control.pack(side="left", padx=10)
+        recycle_cover_control.pack(side="left", padx=self.PAD)
 
         recycle_impeller_control = CircularControl(
             recycle_frame,
             self.recycle_impeller_var,
             label="Impeller",
-            radius=55,
+            base_radius=self.GAUGE_RADIUS,
             callback=self.calculate_and_update
         )
-        recycle_impeller_control.pack(side="left", padx=10)
+        recycle_impeller_control.pack(side="left", padx=self.PAD)
 
         recycle_housing_control = CircularControl(
             recycle_frame,
             self.recycle_housing_var,
             label="Housing",
-            radius=55,
+            base_radius=self.GAUGE_RADIUS,
             callback=self.calculate_and_update
         )
-        recycle_housing_control.pack(side="left", padx=10)
-        
+        recycle_housing_control.pack(side="left", padx=self.PAD)
+
         # Energy mix inputs
         ttk.Label(self.input_panel, text="能源构成", style="Section.TLabel").pack(
-            pady=(20, 10), anchor="w", padx=10)
+            pady=(self.PAD*2, self.PAD), anchor="w", padx=self.PAD)
 
         mix_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
-        mix_frame.pack(fill="x", padx=10, pady=5)
+        mix_frame.pack(fill="x", padx=self.PAD, pady=self.PAD//2)
         # ——— 电价面板 ———
         price_frame = ttk.Frame(mix_frame, style="Panel.TFrame")
-        price_frame.pack(fill="x", pady=5)
+        price_frame.pack(fill="x", pady=self.PAD//2)
 
         ttk.Checkbutton(
             price_frame,
@@ -917,7 +1008,7 @@ class CircularEconomyDashboard:
             textvariable=self.realtime_price,
             width=6
         )
-        self.realtime_price_entry.pack(side="left", padx=(10,2))
+        self.realtime_price_entry.pack(side="left", padx=(self.PAD,2))
         ttk.Label(price_frame, text="€/kWh", style="Panel.TLabel").pack(side="left")
 
         # 默认禁用，只有勾选"使用实时电价"才可编辑
@@ -973,13 +1064,13 @@ class CircularEconomyDashboard:
         
         # Current energy mix display - 使用 StringVar 动态更新
         mix_display_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
-        mix_display_frame.pack(fill="x", padx=10, pady=(0, 10))
+        mix_display_frame.pack(fill="x", padx=self.PAD, pady=(0, self.PAD))
         
         # 创建动态更新的 StringVar
         self.energy_mix_display = tk.StringVar()
         self.price_display = tk.StringVar()
         
-        ttk.Label(mix_display_frame, text="当前能源构成:", style="Panel.TLabel").pack(side="left", padx=10)
+        ttk.Label(mix_display_frame, text="当前能源构成:", style="Panel.TLabel").pack(side="left", padx=self.PAD)
         ttk.Label(mix_display_frame, textvariable=self.energy_mix_display, style="Value.TLabel").pack(side="left", padx=5)
         ttk.Label(mix_display_frame, textvariable=self.price_display, style="Value.TLabel").pack(side="left", padx=5)
         
@@ -988,7 +1079,7 @@ class CircularEconomyDashboard:
         """Create the calculations tab content"""
         # Create a scrollable text area
         calc_frame = ttk.Frame(parent, style="TFrame")
-        calc_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        calc_frame.pack(fill="both", expand=True, padx=self.PAD, pady=self.PAD//2)
         
         # Add a scrollbar
         scrollbar = ttk.Scrollbar(calc_frame)
