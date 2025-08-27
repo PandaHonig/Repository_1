@@ -81,9 +81,9 @@ COLORS = {
 COMPACT = True
 
 GAUGE_RADIUS        = 45 if COMPACT else 55   # 左侧 6 个圆形控件半径（原 55）
-CHART_H_METRICS     = 240 if COMPACT else 300 # 右上图表高度（原 300）
-CHART_H_MATERIALS   = 210 if COMPACT else 270 # 右中图表高度（原 270）
-CHART_H_SCENARIO    = 170 if COMPACT else 250 # 右下场景记录高度（原 250）
+CHART_H_METRICS     = 200 if COMPACT else 300 # 右上图表高度（原 300）
+CHART_H_MATERIALS   = 170 if COMPACT else 270 # 右中图表高度（原 270）
+CHART_H_SCENARIO    = 160 if COMPACT else 250 # 右下场景记录高度（原 250）
 CHART_W_SCENARIO    = 750 if COMPACT else 900 # 场景记录画布宽度（原先实例化 1160）
 
 PAD_X               = 10 if COMPACT else 12   # 通用水平内边距
@@ -98,8 +98,8 @@ VALUE_FONT_SIZE     = 9
 # 压缩图表边距与图例密度
 MARGIN_LEFT         = 46 if COMPACT else 50
 MARGIN_RIGHT        = 16 if COMPACT else 20
-MARGIN_TOP          = 16 if COMPACT else 20
-MARGIN_BOTTOM       = 34 if COMPACT else 40
+MARGIN_TOP          = 14 if COMPACT else 20
+MARGIN_BOTTOM       = 28 if COMPACT else 40
 LEGEND_SPACING      = 18 if COMPACT else 22
 LEGEND_BOX          = 10
 
@@ -733,11 +733,11 @@ class CircularEconomyDashboard:
         """Create visualization panels for metrics and materials"""
         # Create metrics panel
         metrics_panel = ttk.LabelFrame(self.viz_column, text="Metrics Comparison", style="TLabelframe")
-        metrics_panel.pack(fill="both", expand=True, pady=(0, PAD_Y_PANEL))
+        metrics_panel.pack(fill="x", expand=False, pady=(0, PAD_Y_PANEL))
 
         # Create metrics chart
         self.metrics_chart = ComparisonChart(metrics_panel, width=550, height=CHART_H_METRICS)
-        self.metrics_chart.pack(fill="both", expand=True, padx=PAD_X, pady=(0, PAD_Y_SMALL))
+        self.metrics_chart.pack(fill="x", expand=False, padx=PAD_X, pady=(0, PAD_Y_SMALL))
 
         # Create metrics legend
         metrics_legend_frame = ttk.Frame(metrics_panel, style="Panel.TFrame")
@@ -766,11 +766,11 @@ class CircularEconomyDashboard:
         
         # Create materials panel
         materials_panel = ttk.LabelFrame(self.viz_column, text="Materials Breakdown", style="TLabelframe")
-        materials_panel.pack(fill="both", expand=True, pady=(0, PAD_Y_PANEL))
+        materials_panel.pack(fill="x", expand=False, pady=(0, PAD_Y_PANEL))
 
         # Create materials chart with reduced height to make room for legend
         self.materials_chart = ComparisonChart(materials_panel, width=550, height=CHART_H_MATERIALS)
-        self.materials_chart.pack(fill="both", expand=True, padx=PAD_X, pady=(0, PAD_Y_SMALL))
+        self.materials_chart.pack(fill="x", expand=False, padx=PAD_X, pady=(0, PAD_Y_SMALL))
 
         # Create materials legend with more space
         materials_legend_frame = ttk.Frame(materials_panel, style="Panel.TFrame")
@@ -824,7 +824,7 @@ class CircularEconomyDashboard:
             livegraph_panel, width=CHART_W_SCENARIO, height=CHART_H_SCENARIO, max_records=3
         )
         self.records_chart.pack(
-            side="top", fill="both", expand=True, padx=PAD_X, pady=(0, PAD_Y_PANEL)
+            side="top", fill="x", expand=False, padx=PAD_X, pady=(0, PAD_Y_PANEL)
         )
     
     def create_calculation_tabs(self):
