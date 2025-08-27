@@ -81,14 +81,14 @@ COLORS = {
 COMPACT = True
 
 GAUGE_RADIUS        = 45 if COMPACT else 55   # 左侧 6 个圆形控件半径（原 55）
-CHART_H_METRICS     = 200 if COMPACT else 300 # 右上图表高度（原 300）
-CHART_H_MATERIALS   = 170 if COMPACT else 270 # 右中图表高度（原 270）
+CHART_H_METRICS     = 180 if COMPACT else 300 # 右上图表高度（原 300）
+CHART_H_MATERIALS   = 150 if COMPACT else 270 # 右中图表高度（原 270）
 CHART_H_SCENARIO    = 160 if COMPACT else 250 # 右下场景记录高度（原 250）
 CHART_W_SCENARIO    = 750 if COMPACT else 900 # 场景记录画布宽度（原先实例化 1160）
 
 PAD_X               = 10 if COMPACT else 12   # 通用水平内边距
-PAD_Y_SMALL         = 4                        # 行内/图例间距
-PAD_Y_PANEL         = 8                        # 面板之间的垂直间距
+PAD_Y_SMALL         = 3                        # 行内/图例间距
+PAD_Y_PANEL         = 6                        # 面板之间的垂直间距
 
 TITLE_FONT_SIZE     = 12 if COMPACT else 14
 SUBTITLE_FONT_SIZE  = 10 if COMPACT else 11
@@ -98,10 +98,10 @@ VALUE_FONT_SIZE     = 9
 # 压缩图表边距与图例密度
 MARGIN_LEFT         = 46 if COMPACT else 50
 MARGIN_RIGHT        = 16 if COMPACT else 20
-MARGIN_TOP          = 14 if COMPACT else 20
-MARGIN_BOTTOM       = 28 if COMPACT else 40
-LEGEND_SPACING      = 18 if COMPACT else 22
-LEGEND_BOX          = 10
+MARGIN_TOP          = 12 if COMPACT else 20
+MARGIN_BOTTOM       = 24 if COMPACT else 40
+LEGEND_SPACING      = 14 if COMPACT else 22
+LEGEND_BOX          = 8
 
 SHOW_CALC_TABS = False
 
@@ -406,9 +406,10 @@ class ComparisonChart(FuturisticChart):
     def update_chart(self, categories, baseline_values, current_values, colors=None, units=None):
         """Update the chart with new data"""
         # Clear existing chart elements (not grid or axes)
-        self.delete("bar", "label", "value", "unit")
-        
+        self.delete("bar", "label", "value", "unit", "legend")
+
         if not categories or not baseline_values or not current_values:
+            self.draw_legend()
             return
         
         # Set colors if provided
@@ -521,6 +522,33 @@ class ComparisonChart(FuturisticChart):
             text="0", anchor="e", tags="value",
             fill=COLORS["text_secondary"], font=("Segoe UI", 8)
         )
+
+        self.draw_legend()
+
+    def draw_legend(self):
+        """Draw the chart legend inside the top-right corner"""
+        items = [
+            ("Baseline", self.baseline_color),
+            ("Current", self.current_color),
+        ]
+
+        spacing = LEGEND_SPACING
+        box_size = LEGEND_BOX
+        legend_x = self.width - self.margin_right - 80
+        legend_y = self.margin_top
+
+        for i, (label, color) in enumerate(items):
+            y = legend_y + i * spacing
+            self.create_rectangle(
+                legend_x, y,
+                legend_x + box_size, y + box_size,
+                fill=color, outline="", tags="legend"
+            )
+            self.create_text(
+                legend_x + box_size + 5, y + box_size / 2,
+                text=label, anchor="w", fill=COLORS["text"],
+                tags="legend", font=("Segoe UI", 8)
+            )
 
 class RecordBarChart(FuturisticChart):
     """A chart showing up to three saved records as grouped bars"""
@@ -742,63 +770,13 @@ class CircularEconomyDashboard:
         self.metrics_chart = ComparisonChart(metrics_panel, width=550, height=CHART_H_METRICS)
         self.metrics_chart.pack(fill="x", expand=False, padx=PAD_X, pady=(0, PAD_Y_SMALL))
 
-        # Create metrics legend
-        metrics_legend_frame = ttk.Frame(metrics_panel, style="Panel.TFrame")
-        metrics_legend_frame.pack(pady=(0, PAD_Y_PANEL))
-        
-        # Create legend items
-        baseline_frame = ttk.Frame(metrics_legend_frame, width=15, height=15, style="Panel.TFrame")
-        baseline_frame.grid(row=0, column=0, padx=5)
-        baseline_label = ttk.Label(metrics_legend_frame, text="Baseline", style="Panel.TLabel")
-        baseline_label.grid(row=0, column=1, padx=(0, 15))
-        
-        baseline_canvas = tk.Canvas(baseline_frame, width=15, height=15, bg=COLORS["bg_medium"], 
-                                   highlightthickness=0)
-        baseline_canvas.pack(fill="both", expand=True)
-        baseline_canvas.create_rectangle(0, 0, 15, 15, fill=COLORS["negative"], outline="")
-        
-        current_frame = ttk.Frame(metrics_legend_frame, width=15, height=15, style="Panel.TFrame")
-        current_frame.grid(row=0, column=2, padx=5)
-        current_label = ttk.Label(metrics_legend_frame, text="Current", style="Panel.TLabel")
-        current_label.grid(row=0, column=3, padx=5)
-        
-        current_canvas = tk.Canvas(current_frame, width=15, height=15, bg=COLORS["bg_medium"], 
-                                   highlightthickness=0)
-        current_canvas.pack(fill="both", expand=True)
-        current_canvas.create_rectangle(0, 0, 15, 15, fill=COLORS["metric1"], outline="")
-        
         # Create materials panel
         materials_panel = ttk.LabelFrame(self.viz_column, text="Materials Breakdown", style="TLabelframe")
         materials_panel.pack(fill="x", expand=False, pady=(0, PAD_Y_PANEL))
 
-        # Create materials chart with reduced height to make room for legend
+        # Create materials chart
         self.materials_chart = ComparisonChart(materials_panel, width=550, height=CHART_H_MATERIALS)
         self.materials_chart.pack(fill="x", expand=False, padx=PAD_X, pady=(0, PAD_Y_SMALL))
-
-        # Create materials legend with more space
-        materials_legend_frame = ttk.Frame(materials_panel, style="Panel.TFrame")
-        materials_legend_frame.pack(fill="x", pady=(0, PAD_Y_PANEL))
-        
-        # Create legend items - reuse same style as metrics legend
-        baseline_frame2 = ttk.Frame(materials_legend_frame, width=15, height=15, style="Panel.TFrame")
-        baseline_frame2.grid(row=0, column=0, padx=5)
-        baseline_label2 = ttk.Label(materials_legend_frame, text="Baseline", style="Panel.TLabel")
-        baseline_label2.grid(row=0, column=1, padx=(0, 15))
-        
-        baseline_canvas2 = tk.Canvas(baseline_frame2, width=15, height=15, bg=COLORS["bg_medium"], 
-                                   highlightthickness=0)
-        baseline_canvas2.pack(fill="both", expand=True)
-        baseline_canvas2.create_rectangle(0, 0, 15, 15, fill=COLORS["negative"], outline="")
-        
-        current_frame2 = ttk.Frame(materials_legend_frame, width=15, height=15, style="Panel.TFrame")
-        current_frame2.grid(row=0, column=2, padx=5)
-        current_label2 = ttk.Label(materials_legend_frame, text="Current", style="Panel.TLabel")
-        current_label2.grid(row=0, column=3, padx=5)
-        
-        current_canvas2 = tk.Canvas(current_frame2, width=15, height=15, bg=COLORS["bg_medium"], 
-                                   highlightthickness=0)
-        current_canvas2.pack(fill="both", expand=True)
-        current_canvas2.create_rectangle(0, 0, 15, 15, fill=COLORS["material1"], outline="")
         
     def create_livegraph_panel(self):
         """Create panel for saving and comparing records"""
