@@ -772,6 +772,10 @@ class CircularEconomyDashboard:
         self._ramp_up_sec = 10.0                           # 0→100 用时（秒）
         self._ramp_dn_sec = 10.0                           # 100→0 用时（秒）
 
+        # —— 手动锁 & 自动更新标志（新增）——
+        self._manual_lock = False          # 手动调节后锁定，直到L/B再次出现
+        self._auto_updating = False        # 内部自动推进时置True，避免误判为“手动”
+
         # 启动串口读取（根据你的端口修改，如 Win: 'COM3' / Mac: '/dev/tty.usbserial-xxxx' / Linux: '/dev/ttyUSB0'）
         self._start_solar_serial(port_hint='COM5', baud=9600)
 
@@ -1141,6 +1145,12 @@ The Live Metrics Visualization panel lets you save up to three records and compa
         self.calculate_and_update()
     
     def on_slider_change(self, changed, new_value):
+        # —— 新增：手动锁逻辑 ——
+        if changed == 'solar' and not getattr(self, '_auto_updating', False):
+            # 用户手动改动Solar -> 进入“手动锁”，并把目标值同步到当前手动值
+            self._manual_lock = True
+            self._solar_target = float(new_value)
+
         # changed: one of the energy sources
         sources = ['solar', 'wind', 'fossil', 'rest']
         values = {s: getattr(self, f"{s}_pct").get() for s in sources}
@@ -1523,13 +1533,22 @@ The Live Metrics Visualization panel lets you save up to three records and compa
                     m = pat.search(line)
                     if m:
                         raw, base, st = int(m.group(1)), int(m.group(2)), m.group(3)
-                        # 根据状态设定目标值（Ambient不动）
-                        if st == 'L':
-                            self._solar_target = 100.0
-                        elif st == 'B':
-                            self._solar_target = 0.0
-                        # st == 'A' -> 不改变目标
+                        prev = self._solar_state
                         self._solar_state = st
+
+                        if st == 'L':
+                            # 一旦直射出现 -> 解除手动锁，目标设为100（但推进只在state==L时发生）
+                            self._manual_lock = False
+                            self._solar_target = 100.0
+
+                        elif st == 'B':
+                            # 一旦遮挡出现 -> 解除手动锁，目标设为0（推进只在state==B时发生）
+                            self._manual_lock = False
+                            self._solar_target = 0.0
+
+                        else:
+                            # Ambient：不改变目标，不解除已有手动锁
+                            pass
                         # 也可以：print(f"SOLAR {raw=} {base=} {st=}")
                 except Exception as e:
                     print("串口读取异常：", e)
@@ -1540,24 +1559,42 @@ The Live Metrics Visualization panel lets you save up to three records and compa
         threading.Thread(target=worker, daemon=True).start()
 
     def _ramp_tick(self):
-        """每隔 _ramp_interval_ms 让 solar_pct 匀速靠近 _solar_target"""
+        """每隔 _ramp_interval_ms 让 solar_pct 匀速靠近 _solar_target
+           仅在 L/B 时推进；A 或手动锁时不推进
+        """
         try:
             cur = float(self.solar_pct.get())
-            if abs(cur - self._solar_target) > 0.5:
-                # 计算步长
-                if self._solar_target > cur:
-                    # ramp-up
+
+            # 1) 手动锁：完全不动
+            if self._manual_lock:
+                pass
+
+            # 2) 直射时：只做“向上”推进；如果直射停止，state!=L，立刻停
+            elif self._solar_state == 'L':
+                if cur < 100.0 - 0.5:
                     step_per_sec = 100.0 / max(0.1, self._ramp_up_sec)
-                else:
-                    # ramp-down
+                    step = step_per_sec * (self._ramp_interval_ms / 1000.0)
+                    new_val = min(100.0, cur + step)
+                    self._auto_updating = True
+                    self.on_slider_change('solar', new_val)
+                    self._auto_updating = False
+                    self.solar_val_label.config(text=f"{self.solar_pct.get():.0f}%")
+
+            # 3) 遮挡时：只做“向下”推进；如果遮挡停止，state!=B，立刻停
+            elif self._solar_state == 'B':
+                if cur > 0.0 + 0.5:
                     step_per_sec = 100.0 / max(0.1, self._ramp_dn_sec)
-                step = step_per_sec * (self._ramp_interval_ms / 1000.0)
-                new_val = cur + step if self._solar_target > cur else cur - step
-                new_val = max(0.0, min(100.0, new_val))
-                # 通过你的已有函数进行重平衡 & 刷新UI
-                self.on_slider_change('solar', new_val)
-                self.solar_val_label.config(text=f"{self.solar_pct.get():.0f}%")
-            # Ambient时，小波动不动：我们根本不改变 _solar_target，满足“室内细微波动不变化”
+                    step = step_per_sec * (self._ramp_interval_ms / 1000.0)
+                    new_val = max(0.0, cur - step)
+                    self._auto_updating = True
+                    self.on_slider_change('solar', new_val)
+                    self._auto_updating = False
+                    self.solar_val_label.config(text=f"{self.solar_pct.get():.0f}%")
+
+            # 4) Ambient：不推进（保持当前值，不受噪声抖动影响）
+            else:
+                pass
+
         except Exception as e:
             print("ramp出错：", e)
         finally:
