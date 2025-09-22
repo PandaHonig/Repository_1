@@ -766,21 +766,29 @@ class CircularEconomyDashboard:
         self.fetch_realtime_price()
 
 
-        # ===== Solar 控制参数 =====
-        self._solar_target = float(self.solar_pct.get())  # 当前目标值
-        self._ramp_interval_ms = 50                      # 步进周期
-        self._ramp_up_sec = 10.0                          # 0→100 用时（秒）
-        self._ramp_dn_sec = 10.0                          # 100→0 用时（秒）
+        # ===== Solar/Wind 控制参数 =====
+        self._solar_target = float(self.solar_pct.get())   # 当前 Solar 目标值
+        self._ramp_interval_ms = 50                        # 步进周期
+        self._ramp_up_sec = 10.0                           # Solar 0→100 用时（秒）
+        self._ramp_dn_sec = 10.0                           # Solar 100→0 用时（秒）
 
-        # 关键状态量
+        # Solar 状态量
         self._solar_state = 'A'            # 当前 Arduino 状态 A/L/B
         self._last_solar_state = 'A'       # 上一次状态（备用）
         self._manual_lock = False          # 手动调节后锁定，直到 L/B 再次出现
         self._auto_updating = False        # 内部自动推进时置 True，避免误判为“手动”
         self._auto_ramping = False         # 是否处于自动推进中
 
+        # Wind 状态量
+        self._wind_target = float(self.wind_pct.get())
+        self._wind_state = 'STOPPED'
+        self._wind_manual_lock = False
+        self._wind_auto_ramping = False
+        self._wind_auto_updating = False
+        self._wind_ramp_up_sec = 10.0       # Wind 0→100 用时（秒）
+
         # 启动串口读取（根据你的端口修改，如 Win: 'COM3' / Mac: '/dev/tty.usbserial-xxxx' / Linux: '/dev/ttyUSB0'）
-        self._start_solar_serial(port_hint='COM5', baud=9600)
+        self._start_serial(port_hint='COM5', baud=9600)
 
         # 开始定时匀速推进
         self.root.after(self._ramp_interval_ms, self._ramp_tick)
@@ -1156,6 +1164,12 @@ The Live Metrics Visualization panel lets you save up to three records and compa
             self._solar_target = float(new_value)
             self._auto_ramping = False  # 停止自动推进
 
+        if changed == 'wind' and not self._wind_auto_updating:
+            print(f"用户手动调整Wind: {new_value:.1f}%")
+            self._wind_manual_lock = True
+            self._wind_target = float(new_value)
+            self._wind_auto_ramping = False
+
         # changed: one of the energy sources
         sources = ['solar', 'wind', 'fossil', 'rest']
         values = {s: getattr(self, f"{s}_pct").get() for s in sources}
@@ -1508,11 +1522,11 @@ The Live Metrics Visualization panel lets you save up to three records and compa
                 self.update_price_display()
             self.root.after(3600_000, self.fetch_realtime_price)
             
-    def _start_solar_serial(self, port_hint='COM3', baud=9600):
-        """启动串口线程，读取 Arduino 发来的 state=A/L/B"""
+    def _start_serial(self, port_hint='COM3', baud=9600):
+        """启动串口线程，读取 Arduino 发来的 Solar/Wind 状态"""
         self._serial_stop = False
         if serial is None:
-            print("pyserial 未安装，Solar 串口功能禁用")
+            print("pyserial 未安装，串口功能禁用")
             return
 
         def worker():
@@ -1524,7 +1538,7 @@ The Live Metrics Visualization panel lets you save up to three records and compa
                 try:
                     ser = serial.Serial(p, baudrate=baud, timeout=1)
                     ser.reset_input_buffer()
-                    print(f"SOLAR串口连接: {p}")
+                    print(f"串口连接: {p}")
                     break
                 except Exception:
                     continue
@@ -1532,19 +1546,30 @@ The Live Metrics Visualization panel lets you save up to three records and compa
                 print("未能连接到任何串口")
                 return
 
-            pat = re.compile( r"raw\s*=\s*(\d+(?:\.\d+)?)\s*,\s*base\s*=\s*(\d+(?:\.\d+)?)\s*,\s*state\s*=\s*([ALB])", 
-                             re.I
-                             )
+            pat = re.compile(
+                r"raw\s*=\s*(\d+(?:\.\d+)?)\s*,\s*base\s*=\s*(\d+(?:\.\d+)?)\s*,\s*state\s*=\s*([ALB])",
+                re.I,
+            )
+            pat_wind = re.compile(r"\[(SPINNING|STOPPED)\]", re.I)
             while not self._serial_stop:
                 try:
                     line = ser.readline().decode(errors='ignore').strip()
+                    if not line:
+                        continue
+
                     m = pat.search(line)
                     if m:
-                        #raw, base, st = int(m.group(1)), int(m.group(2)), m.group(3)
-                        raw  = int(float(m.group(1)))
+                        raw = int(float(m.group(1)))
                         base = int(float(m.group(2)))
-                        st   = m.group(3).upper()
+                        st = m.group(3).upper()
                         self._process_arduino_state(st)
+                        continue
+
+                    m_wind = pat_wind.search(line)
+                    if m_wind:
+                        wind_state = m_wind.group(1).upper()
+                        self._process_wind_state(wind_state)
+                        continue
                 except Exception as e:
                     print("串口读取异常：", e)
                     time.sleep(0.2)
@@ -1577,12 +1602,34 @@ The Live Metrics Visualization panel lets you save up to three records and compa
                     self._auto_ramping = False
                     self._solar_target = float(self.solar_pct.get())
 
+    def _process_wind_state(self, new_state: str):
+        """处理风力状态变化"""
+        normalized = (new_state or '').upper()
+        old_state = self._wind_state
+        self._wind_state = normalized
+        if old_state != normalized:
+            print(f"Wind状态变化: {old_state} -> {normalized}")
+
+        if normalized == 'SPINNING':
+            print("检测到风机旋转，启动向上推进")
+            self._wind_manual_lock = False
+            self._wind_target = 100.0
+            self._wind_auto_ramping = True
+        elif normalized == 'STOPPED':
+            if not self._wind_manual_lock:
+                print("检测到风机停止，维持当前风能比例")
+            self._wind_auto_ramping = False
+            self._wind_target = float(self.wind_pct.get())
+
     def _ramp_tick(self):
-        """定时推进 Solar 进度"""
+        """定时推进 Solar/Wind 进度"""
         try:
+            solar_changed = False
+            wind_changed = False
+
             current_value = float(self.solar_pct.get())
             if self._auto_ramping and not self._manual_lock:
-                target = self._solar_target
+                target = float(self._solar_target)
                 tolerance = 0.5
                 if abs(current_value - target) > tolerance:
                     if target > current_value:
@@ -1598,13 +1645,37 @@ The Live Metrics Visualization panel lets you save up to three records and compa
                     try:
                         self.solar_pct.set(new_val)
                         self.solar_val_label.config(text=f"{new_val:.0f}%")
-                        self.update_energy_mix()
                     finally:
                         self._auto_updating = False
+                    solar_changed = True
                 else:
                     if self._auto_ramping:
                         print(f"到达目标值 {target:.1f}%，停止推进")
                         self._auto_ramping = False
+
+            current_wind = float(self.wind_pct.get())
+            if self._wind_auto_ramping and not self._wind_manual_lock:
+                target_wind = float(self._wind_target)
+                tolerance = 0.5
+                if abs(current_wind - target_wind) > tolerance:
+                    step_per_sec = 100.0 / max(0.1, self._wind_ramp_up_sec)
+                    step = step_per_sec * (self._ramp_interval_ms / 1000.0)
+                    new_wind = min(target_wind, current_wind + step)
+
+                    self._wind_auto_updating = True
+                    try:
+                        self.wind_pct.set(new_wind)
+                        self.wind_val_label.config(text=f"{new_wind:.0f}%")
+                    finally:
+                        self._wind_auto_updating = False
+                    wind_changed = True
+                else:
+                    if self._wind_auto_ramping:
+                        print(f"风能到达目标值 {target_wind:.1f}%，停止推进")
+                        self._wind_auto_ramping = False
+
+            if solar_changed or wind_changed:
+                self.update_energy_mix()
         except Exception as e:
             print("ramp出错：", e)
         finally:
