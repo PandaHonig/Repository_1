@@ -22,8 +22,8 @@ except ImportError:
     serial = None
 
 # Reference values for material consumption (UPDATED)
-REF_BRASS = 0.500  # kg per unit 
-REF_PLASTIC = 0.200  # kg per unit
+REF_BRASS = 0.80   # kg, housing 主导
+REF_PLASTIC = 0.02  # kg, impeller 主导（完全塑料）
 
 # API 密钥 (需要替换为实际的密钥)
 YOUR_API_KEY = "46b6d9c5-1c8a-4dc0-bb0b-eaf380ec0f6a"
@@ -46,8 +46,7 @@ STANDARD_ENERGY_MIX = {
 
 # Component costs
 COMPONENT_COSTS = {
-    "cover": {"new": 0.70, "reused": 0.30},
-    "impeller": {"new": 0.11, "reused": 0.20},
+    "impeller": {"new": 0.20, "reused": 0.10},
     "housing": {"new": 4.00, "reused": 2.00}
 }
 
@@ -55,13 +54,6 @@ COMPONENT_COSTS = {
 ENERGY_CONSUMPTION = {
     "new": 20.0,    # kWh for completely new
     "reused": 14.0  # kWh for completely reused
-}
-
-# Material influence factors
-MATERIAL_INFLUENCE = {
-    "housing_to_brass": 1.0,     # Housing 100% influences brass
-    "cover_to_plastic": 1.0,     # Cover 100% influences plastic
-    "impeller_to_plastic": 0.3   # Impeller 30% influences plastic compared to cover
 }
 
 # Color scheme for futuristic design
@@ -716,15 +708,11 @@ class CircularEconomyDashboard:
         self.create_livegraph_panel()
         
         # Create input variables
-        self.cover_var = tk.DoubleVar(value=0)
         self.impeller_var = tk.DoubleVar(value=0)
         self.housing_var = tk.DoubleVar(value=0)
         # Individual recycling rates for each component
-        self.recycle_cover_var = tk.DoubleVar(value=0)
         self.recycle_impeller_var = tk.DoubleVar(value=0)
         self.recycle_housing_var = tk.DoubleVar(value=0)
-        # Deprecated global recycling variable (kept for compatibility)
-        self.material_recycling_var = tk.DoubleVar(value=0)
         
         self.solar_pct = tk.DoubleVar(value=int(STANDARD_ENERGY_MIX["solar"] * 100))
         self.wind_pct = tk.DoubleVar(value=int(STANDARD_ENERGY_MIX["wind"] * 100))
@@ -735,19 +723,23 @@ class CircularEconomyDashboard:
         self.price_source = tk.StringVar(value="本地加权均值")
         
         # Create result variables
-        self.energy_baseline = tk.DoubleVar(value=20.0)
+        default_energy = ENERGY_CONSUMPTION["new"]
+        default_cost = COMPONENT_COSTS["housing"]["new"] + COMPONENT_COSTS["impeller"]["new"]
+        default_energy_cost = default_energy * ENERGY_SOURCES["fossil"]["cost"]
+
+        self.energy_baseline = tk.DoubleVar(value=default_energy)
         self.co2_baseline = tk.DoubleVar(value=9.0)
-        self.brass_baseline = tk.DoubleVar(value=0.5)
-        self.plastic_baseline = tk.DoubleVar(value=0.2)
-        self.cost_baseline = tk.DoubleVar(value=4.81)
-        self.energy_cost_baseline = tk.DoubleVar(value=5.60)
-        
-        self.energy_current = tk.DoubleVar(value=20.0)
+        self.brass_baseline = tk.DoubleVar(value=REF_BRASS)
+        self.plastic_baseline = tk.DoubleVar(value=REF_PLASTIC)
+        self.cost_baseline = tk.DoubleVar(value=default_cost)
+        self.energy_cost_baseline = tk.DoubleVar(value=default_energy_cost)
+
+        self.energy_current = tk.DoubleVar(value=default_energy)
         self.co2_current = tk.DoubleVar(value=9.0)
-        self.brass_current = tk.DoubleVar(value=0.5)
-        self.plastic_current = tk.DoubleVar(value=0.2)
-        self.cost_current = tk.DoubleVar(value=4.81)
-        self.energy_cost_current = tk.DoubleVar(value=5.60)
+        self.brass_current = tk.DoubleVar(value=REF_BRASS)
+        self.plastic_current = tk.DoubleVar(value=REF_PLASTIC)
+        self.cost_current = tk.DoubleVar(value=default_cost)
+        self.energy_cost_current = tk.DoubleVar(value=default_energy_cost)
         
         # Create input widget elements
         self.create_input_widgets()
@@ -881,19 +873,10 @@ class CircularEconomyDashboard:
         reuse_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
         reuse_frame.pack(fill="x", pady=5, padx=10)
 
-        cover_control = CircularControl(
-            reuse_frame,
-            self.cover_var,
-            label="Cover",
-            radius=GAUGE_RADIUS,
-            callback=self.calculate_and_update
-        )
-        cover_control.pack(side="left", padx=10)
-
         impeller_control = CircularControl(
             reuse_frame,
             self.impeller_var,
-            label="Impeller",
+            label="Impeller (polymer)",
             radius=GAUGE_RADIUS,
             callback=self.calculate_and_update
         )
@@ -915,19 +898,10 @@ class CircularEconomyDashboard:
         recycle_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
         recycle_frame.pack(fill="x", pady=5, padx=10)
 
-        recycle_cover_control = CircularControl(
-            recycle_frame,
-            self.recycle_cover_var,
-            label="Cover",
-            radius=GAUGE_RADIUS,
-            callback=self.calculate_and_update
-        )
-        recycle_cover_control.pack(side="left", padx=10)
-
         recycle_impeller_control = CircularControl(
             recycle_frame,
             self.recycle_impeller_var,
-            label="Impeller",
+            label="Impeller (polymer)",
             radius=GAUGE_RADIUS,
             callback=self.calculate_and_update
         )
@@ -1094,8 +1068,8 @@ class CircularEconomyDashboard:
 
         # Material calculation
         calc_text.insert("end", "5. MATERIALS\n", "subheading")
-        calc_text.insert("end", "Brass: reuse by housing (80%) + recycling of remaining 20%\n")
-        calc_text.insert("end", "Plastic: reuse and recycling weighted by cover and impeller influence (80%/20%)\n\n")
+        calc_text.insert("end", "Brass: 80% reuse reduction via housing + 20% recycling retention\n")
+        calc_text.insert("end", "Plastic: 80% reuse reduction via impeller + 20% recycling retention\n\n")
         
         # Configure tags for styling
         calc_text.tag_configure("heading", font=("Segoe UI", 12, "bold"), foreground=COLORS["accent"])
@@ -1116,10 +1090,9 @@ This dashboard simulates the impact of reusing and recycling components:
 
 Input Parameters:
 - Component Reusability: Percentage of each component that is reused
-    - Cover: €0.70 new, €0.30 reused (influences plastic)
-    - Impeller: €0.11 new, €0.20 reused (influences plastic at 30% level)
-    - Housing: €4.00 new, €2.00 reused (influences brass)
-- Component Recycling (Cover/Impeller/Housing): Percentage of each component's materials that are recycled
+    - Impeller (polymer): €0.20 new, €0.10 reused
+    - Housing: €4.00 new, €2.00 reused
+- Component Recycling (Impeller/Housing): Percentage of each component's materials that are recycled
     - Each component's cost increases by up to 30% when fully recycled
     - Reuse affects up to 80% of material needs; recycling reduces the remaining 20%
     - Effective recycling, weighted by brass and plastic masses, can cut CO₂ up to 50%
@@ -1263,94 +1236,79 @@ The Live Metrics Visualization panel lets you save up to three records and compa
 
         self.calculate_and_update()
     
-    def calculate_metrics(self, cover_reuse_pct, impeller_reuse_pct, housing_reuse_pct,
-                          recycle_cover_pct, recycle_impeller_pct, recycle_housing_pct,
+    def calculate_metrics(self, impeller_reuse_pct, housing_reuse_pct,
+                          recycle_impeller_pct, recycle_housing_pct,
                           energy_mix_type, factors):
         """计算所有指标"""
-        # Energy calculation
-        base_energy = ENERGY_CONSUMPTION["new"]  # kWh for a new part
-        reused_energy = ENERGY_CONSUMPTION["reused"]  # kWh for a reused part
-        
-        # Calculate average reuse percentage weighted by component cost
-        total_new_cost = (
-            COMPONENT_COSTS["cover"]["new"] + 
-            COMPONENT_COSTS["impeller"]["new"] + 
-            COMPONENT_COSTS["housing"]["new"]
+        base_energy = ENERGY_CONSUMPTION["new"]
+        reused_energy = ENERGY_CONSUMPTION["reused"]
+
+        housing_new = COMPONENT_COSTS["housing"]["new"]
+        impeller_new = COMPONENT_COSTS["impeller"]["new"]
+        total_new_cost = housing_new + impeller_new
+
+        weighted_reuse_pct = 100.0 * (
+            (housing_reuse_pct / 100.0) * (housing_new / total_new_cost) +
+            (impeller_reuse_pct / 100.0) * (impeller_new / total_new_cost)
         )
-        
-        weighted_cover_reuse = (cover_reuse_pct / 100) * (COMPONENT_COSTS["cover"]["new"] / total_new_cost)
-        weighted_impeller_reuse = (impeller_reuse_pct / 100) * (COMPONENT_COSTS["impeller"]["new"] / total_new_cost)
-        weighted_housing_reuse = (housing_reuse_pct / 100) * (COMPONENT_COSTS["housing"]["new"] / total_new_cost)
-        
-        weighted_avg_reuse = (weighted_cover_reuse + weighted_impeller_reuse + weighted_housing_reuse) * 100
-        
-        # Calculate component costs
-        cover_cost = (COMPONENT_COSTS["cover"]["new"] * (1 - cover_reuse_pct/100)) + (COMPONENT_COSTS["cover"]["reused"] * (cover_reuse_pct/100))
-        impeller_cost = (COMPONENT_COSTS["impeller"]["new"] * (1 - impeller_reuse_pct/100)) + (COMPONENT_COSTS["impeller"]["reused"] * (impeller_reuse_pct/100))
-        housing_cost = (COMPONENT_COSTS["housing"]["new"] * (1 - housing_reuse_pct/100)) + (COMPONENT_COSTS["housing"]["reused"] * (housing_reuse_pct/100))
 
-        cover_cost *= (1 + 0.3 * recycle_cover_pct/100.0)
-        impeller_cost *= (1 + 0.3 * recycle_impeller_pct/100.0)
-        housing_cost *= (1 + 0.3 * recycle_housing_pct/100.0)
+        energy = base_energy - (weighted_reuse_pct / 100.0) * (base_energy - reused_energy)
 
-        total_component_cost = cover_cost + impeller_cost + housing_cost
-        
-        # Linear interpolation between new and reused energy based on weighted average reuse
-        energy = base_energy - (weighted_avg_reuse / 100) * (base_energy - reused_energy)
-        
-        # CO2 is affected by energy consumption and energy mix
-        # Add recycling factor that reduces CO2 by up to 50%
-        # 计算 CO₂ 强度（kgCO2/kWh）
-        avg_co2 = sum(ENERGY_SOURCES[src]['co2'] * factors[src] for src in factors) / 1000.0
+        cost_housing = (
+            (1 - housing_reuse_pct / 100.0) * COMPONENT_COSTS["housing"]["new"] +
+            (housing_reuse_pct / 100.0) * COMPONENT_COSTS["housing"]["reused"]
+        )
+        cost_impeller = (
+            (1 - impeller_reuse_pct / 100.0) * COMPONENT_COSTS["impeller"]["new"] +
+            (impeller_reuse_pct / 100.0) * COMPONENT_COSTS["impeller"]["reused"]
+        )
 
-        avg_cost = self.compute_avg_cost(factors)
+        cost_housing *= (1 + 0.3 * recycle_housing_pct / 100.0)
+        cost_impeller *= (1 + 0.3 * recycle_impeller_pct / 100.0)
 
-        # Calculate materials with reuse and recycling effects
-        brass = REF_BRASS * (1 - housing_reuse_pct/100.0) * 0.8 \
-                + REF_BRASS * 0.2 * (1 - recycle_housing_pct/100.0)
+        component_cost_eur = cost_housing + cost_impeller
 
-        total_w = MATERIAL_INFLUENCE["cover_to_plastic"] + MATERIAL_INFLUENCE["impeller_to_plastic"]
-        wC = MATERIAL_INFLUENCE["cover_to_plastic"] / total_w
-        wI = MATERIAL_INFLUENCE["impeller_to_plastic"] / total_w
+        avg_co2_kg_per_kwh = sum(ENERGY_SOURCES[src]['co2'] * factors[src] for src in factors) / 1000.0
+        avg_price_eur_per_kwh = self.compute_avg_cost(factors)
 
-        reuse_factor_plastic = (wC * (1 - cover_reuse_pct/100.0)) + (wI * (1 - impeller_reuse_pct/100.0))
-        recycle_plastic_pct = (wC * recycle_cover_pct) + (wI * recycle_impeller_pct)
+        brass_kg = REF_BRASS * (1 - housing_reuse_pct / 100.0) * 0.8 \
+            + REF_BRASS * 0.2 * (1 - recycle_housing_pct / 100.0)
+        plastic_kg = REF_PLASTIC * (1 - impeller_reuse_pct / 100.0) * 0.8 \
+            + REF_PLASTIC * 0.2 * (1 - recycle_impeller_pct / 100.0)
 
-        plastic = REF_PLASTIC * reuse_factor_plastic * 0.8 \
-                + REF_PLASTIC * 0.2 * (1 - recycle_plastic_pct/100.0)
+        effective_recycle_pct = (
+            REF_BRASS * recycle_housing_pct + REF_PLASTIC * recycle_impeller_pct
+        ) / (REF_BRASS + REF_PLASTIC)
 
-        effective_recycle_pct = (REF_BRASS * recycle_housing_pct + REF_PLASTIC * recycle_plastic_pct) / (REF_BRASS + REF_PLASTIC)
-        co2 = energy * avg_co2 * (1 - 0.5 * effective_recycle_pct/100.0)
-
-        # 计算能源成本
-        energy_cost = energy * avg_cost
+        co2_kg = energy * avg_co2_kg_per_kwh * (1 - 0.5 * effective_recycle_pct / 100.0)
+        energy_cost_eur = energy * avg_price_eur_per_kwh
+        total_cost_for_plot = component_cost_eur + energy_cost_eur
 
         return {
             "energy": energy,
-            "energy_cost": energy_cost,
-            "co2": co2,
-            "brass": brass,
-            "plastic": plastic,
-            "component_cost": total_component_cost
+            "energy_cost": energy_cost_eur,
+            "co2": co2_kg,
+            "brass": brass_kg,
+            "plastic": plastic_kg,
+            "component_cost": component_cost_eur,
+            "total_cost": total_cost_for_plot
         }
     
     def calculate_and_update(self):
         try:
             # Get the component reuse percentages
-            cover_reuse = float(self.cover_var.get())
             impeller_reuse = float(self.impeller_var.get())
             housing_reuse = float(self.housing_var.get())
-            
-            rc = float(self.recycle_cover_var.get())
-            ri = float(self.recycle_impeller_var.get())
-            rh = float(self.recycle_housing_var.get())
+
+            recycle_impeller = float(self.recycle_impeller_var.get())
+            recycle_housing = float(self.recycle_housing_var.get())
 
             # 强制 baseline 为 0% reuse/recycle + 100% fossil
             baseline_factors = {'solar': 0.0, 'wind': 0.0, 'fossil': 1.0, 'rest': 0.0}
-            baseline_metrics = self.calculate_metrics(0, 0, 0, 0, 0, 0, None, baseline_factors)
+            baseline_metrics = self.calculate_metrics(0, 0, 0, 0, None, baseline_factors)
 
             # Calculate current metrics
-            current_metrics = self.calculate_metrics(cover_reuse, impeller_reuse, housing_reuse, rc, ri, rh, None, self.factors)
+            current_metrics = self.calculate_metrics(impeller_reuse, housing_reuse, recycle_impeller, recycle_housing, None, self.factors)
             
             # Update the result variables
             self.energy_baseline.set(baseline_metrics['energy'])
@@ -1373,12 +1331,12 @@ The Live Metrics Visualization panel lets you save up to three records and compa
                 ["Energy", "Cost", "CO2"],
                 [
                     baseline_metrics['energy'],
-                    baseline_metrics['component_cost'] + baseline_metrics['energy_cost'],
+                    baseline_metrics['total_cost'],
                     baseline_metrics['co2']
                 ],
                 [
                     current_metrics['energy'],
-                    current_metrics['component_cost'] + current_metrics['energy_cost'],
+                    current_metrics['total_cost'],
                     current_metrics['co2']
                 ],
                 [COLORS["negative"], COLORS["metric1"]],
@@ -1405,18 +1363,14 @@ The Live Metrics Visualization panel lets you save up to three records and compa
             print(f"Error in calculation: {e}")
     def save_record(self):
         """Save the current metrics as a record"""
-        cover_reuse = int(self.cover_var.get())
         impeller_reuse = int(self.impeller_var.get())
         housing_reuse = int(self.housing_var.get())
-        recycle_cover = int(self.recycle_cover_var.get())
         recycle_impeller = int(self.recycle_impeller_var.get())
         recycle_housing = int(self.recycle_housing_var.get())
 
         current_metrics = self.calculate_metrics(
-            cover_reuse,
             impeller_reuse,
             housing_reuse,
-            recycle_cover,
             recycle_impeller,
             recycle_housing,
             None,
@@ -1425,17 +1379,15 @@ The Live Metrics Visualization panel lets you save up to three records and compa
 
         record = {
             "label": f"Record {len(self.records_chart.records) + 1}",
-            "reuse_cover": cover_reuse,
             "reuse_impeller": impeller_reuse,
             "reuse_housing": housing_reuse,
-            "recycle_cover": recycle_cover,
             "recycle_impeller": recycle_impeller,
             "recycle_housing": recycle_housing,
             "energy": current_metrics['energy'],
             "co2": current_metrics['co2'],
             "brass": current_metrics['brass'],
             "plastic": current_metrics['plastic'],
-            "cost": current_metrics['component_cost'] + current_metrics['energy_cost'],
+            "cost": current_metrics['total_cost'],
         }
         self.records_chart.add_record(record)
 
