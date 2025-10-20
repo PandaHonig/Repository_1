@@ -1096,8 +1096,14 @@ class CircularEconomyDashboard:
 
         # Material calculation
         calc_text.insert("end", "5. MATERIALS\n", "subheading")
-        calc_text.insert("end", "Brass: 80% reman leverage + 20% recycling stream from housing\n")
-        calc_text.insert("end", "Plastic: 80% reman leverage + 20% recycling stream from impeller\n\n")
+        calc_text.insert(
+            "end",
+            "Brass: REF_BRASS * Q_new_housing split into virgin / secondary by share_sec_housing\n",
+        )
+        calc_text.insert(
+            "end",
+            "Plastic: REF_PLASTIC * Q_new_impeller split into virgin / secondary by share_sec_impeller\n\n",
+        )
         
         # Configure tags for styling
         calc_text.tag_configure("heading", font=("Segoe UI", 12, "bold"), foreground=COLORS["accent"])
@@ -1134,8 +1140,8 @@ Energy Consumption:
 - Fully reused units require 14 kWh
 
 Material Consumption:
-- Remanufacturing offsets up to 80% of brass/plastic demand per component
-- Recycling supplies the remaining 20% as secondary material
+- Remanufacturing lowers demand in proportion to each component's reman share
+- Recycling supplies secondary feedstock for the remaining new-build fraction
 - Secondary feedstock can reduce lifecycle CO₂ emissions by up to 50%
 
 The dashboard compares the baseline scenario (0% reuse, 0% recycle, USA energy) with your current settings.
