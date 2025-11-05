@@ -102,28 +102,32 @@ COLORS = {
 # --- Compact sizing (no autoscale) ---
 COMPACT = True
 
-GAUGE_RADIUS        = 45 if COMPACT else 55   # 左侧 6 个圆形控件半径（原 55）
-CHART_H_METRICS     = 180 if COMPACT else 300 # 右上图表高度（原 300）
-CHART_H_MATERIALS   = 150 if COMPACT else 270 # 右中图表高度（原 270）
-CHART_H_SCENARIO    = 160 if COMPACT else 250 # 右下场景记录高度（原 250）
-CHART_W_SCENARIO    = 750 if COMPACT else 900 # 场景记录画布宽度（原先实例化 1160）
+ROOT_WIDTH          = 1040
+ROOT_HEIGHT         = 700
 
-PAD_X               = 10 if COMPACT else 12   # 通用水平内边距
-PAD_Y_SMALL         = 3                        # 行内/图例间距
-PAD_Y_PANEL         = 6                        # 面板之间的垂直间距
+GAUGE_RADIUS        = 38 if COMPACT else 55   # 左侧 6 个圆形控件半径（原 55）
+CHART_W_RIGHT       = 480 if COMPACT else 550 # 右栏图表宽度
+CHART_H_METRICS     = 160 if COMPACT else 300 # 右上图表高度（原 300）
+CHART_H_MATERIALS   = 140 if COMPACT else 270 # 右中图表高度（原 270）
+CHART_H_SCENARIO    = 140 if COMPACT else 250 # 右下场景记录高度（原 250）
+CHART_W_SCENARIO    = 620 if COMPACT else 900 # 场景记录画布宽度（原先实例化 1160）
 
-TITLE_FONT_SIZE     = 12 if COMPACT else 14
-SUBTITLE_FONT_SIZE  = 10 if COMPACT else 11
-SECTION_FONT_SIZE   = 9  if COMPACT else 10
-VALUE_FONT_SIZE     = 9
+PAD_X               = 8 if COMPACT else 12    # 通用水平内边距
+PAD_Y_SMALL         = 2                        # 行内/图例间距
+PAD_Y_PANEL         = 5                        # 面板之间的垂直间距
+
+TITLE_FONT_SIZE     = 11 if COMPACT else 14
+SUBTITLE_FONT_SIZE  = 9 if COMPACT else 11
+SECTION_FONT_SIZE   = 8 if COMPACT else 10
+VALUE_FONT_SIZE     = 8
 
 # 压缩图表边距与图例密度
-MARGIN_LEFT         = 46 if COMPACT else 50
-MARGIN_RIGHT        = 16 if COMPACT else 20
-MARGIN_TOP          = 12 if COMPACT else 20
-MARGIN_BOTTOM       = 24 if COMPACT else 40
-LEGEND_SPACING      = 14 if COMPACT else 22
-LEGEND_BOX          = 8
+MARGIN_LEFT         = 38 if COMPACT else 50
+MARGIN_RIGHT        = 12 if COMPACT else 20
+MARGIN_TOP          = 10 if COMPACT else 20
+MARGIN_BOTTOM       = 18 if COMPACT else 40
+LEGEND_SPACING      = 12 if COMPACT else 22
+LEGEND_BOX          = 7
 
 SHOW_CALC_TABS = False
 
@@ -216,15 +220,15 @@ class CircularControl(tk.Canvas):
         
         # Draw value text
         self.create_text(
-            cx, cy, text=f"{int(value)}%", 
-            fill=self.text_color, font=("Segoe UI", 12, "bold"),
+            cx, cy, text=f"{int(value)}%",
+            fill=self.text_color, font=("Segoe UI", 11, "bold"),
             tags="value"
         )
         
         # Draw label
         self.create_text(
             cx, self.height - 15, text=self.label,
-            fill=self.text_color, font=("Segoe UI", 9),
+            fill=self.text_color, font=("Segoe UI", 8),
             tags="label"
         )
     
@@ -285,9 +289,9 @@ class FuturisticStyle:
         
         # Configure common elements
         style.configure("TFrame", background=COLORS["bg_dark"])
-        style.configure("TLabel", background=COLORS["bg_dark"], foreground=COLORS["text"], font=("Segoe UI", 9))
-        style.configure("TButton", background=COLORS["bg_light"], foreground=COLORS["text"], 
-                        font=("Segoe UI", 9, "bold"), borderwidth=0)
+        style.configure("TLabel", background=COLORS["bg_dark"], foreground=COLORS["text"], font=("Segoe UI", 8))
+        style.configure("TButton", background=COLORS["bg_light"], foreground=COLORS["text"],
+                        font=("Segoe UI", 8, "bold"), borderwidth=0)
         style.map("TButton", background=[("active", COLORS["accent"])])
         
         # Style for panels
@@ -307,7 +311,7 @@ class FuturisticStyle:
         # Configure notebook (tabs)
         style.configure("TNotebook", background=COLORS["bg_dark"], borderwidth=0)
         style.configure("TNotebook.Tab", background=COLORS["bg_medium"], foreground=COLORS["text"],
-                       padding=[10, 5], font=("Segoe UI", 9))
+                       padding=[10, 5], font=("Segoe UI", 8))
         style.map("TNotebook.Tab", background=[("selected", COLORS["bg_light"])], 
                  foreground=[("selected", COLORS["text"])])
         
@@ -319,7 +323,7 @@ class FuturisticStyle:
             "Accent.TButton",
             background=COLORS["bg_light"],
             foreground=COLORS["text"],
-            font=("Segoe UI", 9, "bold"),
+            font=("Segoe UI", 8, "bold"),
             borderwidth=0,
         )
         style.map(
@@ -330,21 +334,21 @@ class FuturisticStyle:
         
         # Style for LabelFrame
         style.configure("TLabelframe", background=COLORS["bg_medium"], foreground=COLORS["text"])
-        style.configure("TLabelframe.Label", background=COLORS["bg_medium"], foreground=COLORS["text"], 
-                      font=("Segoe UI", 10, "bold"))
+        style.configure("TLabelframe.Label", background=COLORS["bg_medium"], foreground=COLORS["text"],
+                      font=("Segoe UI", 8, "bold"))
 
         style.configure("Futuristic.Horizontal.TScale",
             background=COLORS["bg_medium"],
             troughcolor=COLORS["bg_light"],
-            sliderthickness=18,
-            sliderlength=28
+            sliderthickness=16,
+            sliderlength=24
         )
         #“Save / Clear”的深色按钮
         style.configure(
            "CyberDark.TButton",
            background=COLORS["bg_light"],     # 深灰蓝
            foreground=COLORS["text"],         # 亮字
-           font=("Segoe UI", 9, "bold"),
+           font=("Segoe UI", 8, "bold"),
            borderwidth=0,
            relief="flat",
         )
@@ -418,8 +422,8 @@ class FuturisticChart(tk.Canvas):
 
 class ComparisonChart(FuturisticChart):
     """A futuristic bar chart for comparing baseline vs current values"""
-    
-    def __init__(self, parent, width=550, height=300):
+
+    def __init__(self, parent, width=CHART_W_RIGHT, height=300):
         """Initialize the chart"""
         super().__init__(parent, width, height)
         self.baseline_color = COLORS["negative"]
@@ -516,7 +520,7 @@ class ComparisonChart(FuturisticChart):
             self.create_text(
                 x_center, self.height - self.margin_bottom/2,
                 text=f"{category}{unit_text}", anchor="center", tags="label",
-                fill=COLORS["text"], font=("Segoe UI", 9)
+                fill=COLORS["text"], font=("Segoe UI", 8)
             )
             
             # Draw baseline value
@@ -699,7 +703,7 @@ class CircularEconomyDashboard:
     def __init__(self, root):
         self.root = root
         self.root.title("Circular Economy Dashboard")
-        self.root.geometry("1200x800")
+        self.root.geometry(f"{ROOT_WIDTH}x{ROOT_HEIGHT}")
         self.root.configure(bg=COLORS["bg_dark"])
         
         # Apply futuristic styling
@@ -826,7 +830,7 @@ class CircularEconomyDashboard:
         metrics_panel.pack(fill="x", expand=False, pady=(0, PAD_Y_PANEL))
 
         # Create metrics chart
-        self.metrics_chart = ComparisonChart(metrics_panel, width=550, height=CHART_H_METRICS)
+        self.metrics_chart = ComparisonChart(metrics_panel, width=CHART_W_RIGHT, height=CHART_H_METRICS)
         self.metrics_chart.pack(fill="x", expand=False, padx=PAD_X, pady=(0, PAD_Y_SMALL))
 
         # Create materials panel
@@ -834,7 +838,7 @@ class CircularEconomyDashboard:
         materials_panel.pack(fill="x", expand=False, pady=(0, PAD_Y_PANEL))
 
         # Create materials chart
-        self.materials_chart = ComparisonChart(materials_panel, width=550, height=CHART_H_MATERIALS)
+        self.materials_chart = ComparisonChart(materials_panel, width=CHART_W_RIGHT, height=CHART_H_MATERIALS)
         self.materials_chart.pack(fill="x", expand=False, padx=PAD_X, pady=(0, PAD_Y_SMALL))
         
     def create_livegraph_panel(self):
@@ -1106,8 +1110,8 @@ class CircularEconomyDashboard:
         )
         
         # Configure tags for styling
-        calc_text.tag_configure("heading", font=("Segoe UI", 12, "bold"), foreground=COLORS["accent"])
-        calc_text.tag_configure("subheading", font=("Segoe UI", 10, "bold"), foreground=COLORS["text"])
+        calc_text.tag_configure("heading", font=("Segoe UI", 11, "bold"), foreground=COLORS["accent"])
+        calc_text.tag_configure("subheading", font=("Segoe UI", 9, "bold"), foreground=COLORS["text"])
         
         # Make the text widget read-only
         calc_text.config(state="disabled")
