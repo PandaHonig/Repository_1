@@ -300,9 +300,38 @@ class CircularControl(tk.Canvas):
         
         # Redraw control
         self._draw_control()
-        
+
         # Trigger callback if provided and value changed
         if self.callback and abs(old_value - value) > 0.1:
+            self.callback()
+
+    def set_external_value(self, value):
+        """
+        设置一个外部给定的百分比数值（例如来自串口 / Poti），而不是鼠标事件。
+
+        value: 0–100 的数值，可以是 float，将被限制在 0–100 范围，保留一位小数。
+        """
+        try:
+            v = float(value)
+        except Exception:
+            return
+
+        # 限制在 0–100
+        v = max(0.0, min(100.0, v))
+
+        old_value = self.variable.get()
+        if abs(old_value - v) < 0.1:
+            # 变化太小就不必重画和触发回调，避免 UI 抖动
+            return
+
+        # 写入 Tkinter 变量
+        self.variable.set(round(v, 1))
+
+        # 重画控件
+        self._draw_control()
+
+        # 保持行为与鼠标更新一致：触发 callback
+        if self.callback:
             self.callback()
 
 class FuturisticStyle:
@@ -951,6 +980,8 @@ class CircularEconomyDashboard:
             ("Housing\nRecycling", self.housing_recycling_percent),
         ]
 
+        self.knob_widgets = []  # 保存 5 个 CircularControl 实例，顺序与 cells 保持一致
+
         for idx, (lbl, var) in enumerate(cells):
             r, c = divmod(idx, 3)
             w = CircularControl(
@@ -961,9 +992,23 @@ class CircularEconomyDashboard:
                 callback=self.calculate_and_update,
             )
             w.grid(row=r, column=c, padx=6, pady=4, sticky="w")
+            self.knob_widgets.append(w)
 
         for col in (0, 1, 2):
             controls_grid.grid_columnconfigure(col, weight=1)
+
+        # 约定 5 个旋钮与 Poti 顺序的对应关系：
+        # P1 -> Wasserzähler Reuse
+        # P2 -> Impeller Remanufacturing
+        # P3 -> Housing Remanufacturing
+        # P4 -> Impeller Recycling
+        # P5 -> Housing Recycling
+        if len(self.knob_widgets) >= 5:
+            self.knob_meter_reuse        = self.knob_widgets[0]
+            self.knob_impeller_reman     = self.knob_widgets[1]
+            self.knob_housing_reman      = self.knob_widgets[2]
+            self.knob_impeller_recycling = self.knob_widgets[3]
+            self.knob_housing_recycling  = self.knob_widgets[4]
         
         # Energy mix inputs
         ttk.Label(self.input_panel, text="Energiemix", style="Section.TLabel").pack(
@@ -1652,6 +1697,10 @@ The Scenario Comparison panel lets you save up to three records and compare thei
                 re.I,
             )
             pat_wind = re.compile(r"\[(SPINNING|STOPPED)\]", re.I)
+            pat_pots = re.compile(
+                r"POTS:\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)",
+                re.I,
+            )
             while not self._serial_stop:
                 try:
                     line = ser.readline().decode(errors='ignore').strip()
@@ -1670,6 +1719,14 @@ The Scenario Comparison panel lets you save up to three records and compare thei
                     if m_wind:
                         wind_state = m_wind.group(1).upper()
                         self._process_wind_state(wind_state)
+                        continue
+
+                    # 新增：解析 5 个 Poti 数值行，比如：
+                    # "POTS: 123,456,789,0,1023"
+                    m_pots = pat_pots.search(line)
+                    if m_pots:
+                        raw_values = [int(m_pots.group(i)) for i in range(1, 6)]
+                        self._process_pot_values(raw_values)
                         continue
                 except Exception as e:
                     print("串口读取异常：", e)
@@ -1721,6 +1778,49 @@ The Scenario Comparison panel lets you save up to three records and compare thei
             #    print("检测到风机停止，维持当前风能比例")'
             self._wind_auto_ramping = False
             self._wind_target = float(self.wind_pct.get())
+
+    def _process_pot_values(self, raw_values):
+        """
+        处理 Arduino 发送过来的 5 个 Poti 原始数值（0–1023）。
+
+        串口行格式约定为：
+            POTS: v1,v2,v3,v4,v5
+
+        含义对应关系（索引从 0 开始）：
+            v1 -> Wasserzähler Reuse 旋钮
+            v2 -> Impeller Remanufacturing 旋钮
+            v3 -> Housing  Remanufacturing  旋钮
+            v4 -> Impeller Recycling  旋钮
+            v5 -> Housing  Recycling   旋钮
+        """
+        if not isinstance(raw_values, (list, tuple)) or len(raw_values) != 5:
+            return
+
+        # 将 0–1023 线性映射到 0–100%
+        def to_percent(v):
+            try:
+                v = int(v)
+            except Exception:
+                return 0.0
+            v = max(0, min(1023, v))
+            return round(v / 1023.0 * 100.0, 1)
+
+        percents = [to_percent(v) for v in raw_values]
+
+        # 在主线程里更新 UI（Tkinter 不允许跨线程操作控件）
+        def apply_to_ui():
+            try:
+                if hasattr(self, "knob_meter_reuse"):
+                    self.knob_meter_reuse.set_external_value(percents[0])
+                    self.knob_impeller_reman.set_external_value(percents[1])
+                    self.knob_housing_reman.set_external_value(percents[2])
+                    self.knob_impeller_recycling.set_external_value(percents[3])
+                    self.knob_housing_recycling.set_external_value(percents[4])
+            except Exception as e:
+                print("应用 Poti 数值时出错:", e)
+
+        # root 是 Tk 实例
+        self.root.after(0, apply_to_ui)
 
     def _ramp_tick(self):
         """定时推进 Solar/Wind 进度"""
