@@ -776,8 +776,8 @@ class CircularEconomyDashboard:
     def create_livegraph_panel(self):
         """Create panel for saving and comparing records"""
         # old version:  Live Metrics Visualization
-        livegraph_panel = ttk.LabelFrame(self.root, text="Scenario Comparison") 
-        livegraph_panel.pack(fill="x", padx=10, pady=(0, 10))
+        livegraph_panel = ttk.LabelFrame(self.viz_column, text="Scenario Comparison")
+        livegraph_panel.pack(fill="both", expand=True, pady=(10, 0))
 
         control_frame = ttk.Frame(livegraph_panel)
         control_frame.pack(side="top", fill="x", padx=10, pady=(0, 5))
