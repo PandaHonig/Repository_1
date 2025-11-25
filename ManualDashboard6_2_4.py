@@ -453,10 +453,11 @@ class ComparisonChart(FuturisticChart):
         if not units:
             units = [""] * len(categories)
         
-        # Find the maximum value for scaling
-        max_value = max(max(baseline_values), max(current_values))
-        if max_value == 0:
-            max_value = 1  # Avoid division by zero
+        # Find the maximum value for scaling and add headroom on the y-axis
+        raw_max = max(max(baseline_values), max(current_values))
+        if raw_max == 0:
+            raw_max = 1  # Avoid division by zero
+        ymax = raw_max * 1.15
         
         # Calculate bar width and spacing
         num_groups = len(categories)
@@ -471,8 +472,8 @@ class ComparisonChart(FuturisticChart):
             x_current = x_center + bar_width/2 + 5
             
             # Calculate bar heights
-            baseline_height = (baseline_values[i] / max_value) * self.chart_height
-            current_height = (current_values[i] / max_value) * self.chart_height
+            baseline_height = (baseline_values[i] / ymax) * self.chart_height
+            current_height = (current_values[i] / ymax) * self.chart_height
             
             # Ensure minimum visible height
             if baseline_height < 1 and baseline_values[i] > 0:
@@ -545,7 +546,7 @@ class ComparisonChart(FuturisticChart):
         # Draw scale on y-axis
         self.create_text(
             self.margin_left - 5, self.margin_top,
-            text=f"{max_value:.1f}", anchor="e", tags="value",
+            text=f"{ymax:.1f}", anchor="e", tags="value",
             fill=COLORS["text_secondary"], font=("Segoe UI", 8)
         )
         self.create_text(
