@@ -428,7 +428,11 @@ class FuturisticStyle:
 
 
 class FuturisticTooltip:
-    """Futuristic style tooltip bubble for Tk/ttk widgets."""
+    """Futuristic style tooltip bubble for Tk/ttk widgets.
+
+    - 自动根据鼠标位置放置气泡
+    - 避免超出屏幕边界（左右/上下都会夹紧）
+    """
 
     def __init__(self, widget, text, wraplength=260):
         self.widget = widget
@@ -440,16 +444,42 @@ class FuturisticTooltip:
         widget.bind("<Leave>", self._hide)
         widget.bind("<Motion>", self._move)
 
+    def _clamp_to_screen(self, x, y, tw):
+        """根据屏幕和 tooltip 尺寸，把 (x,y) 夹紧在可见范围内"""
+        tw.update_idletasks()
+        screen_w = tw.winfo_screenwidth()
+        screen_h = tw.winfo_screenheight()
+        w = tw.winfo_reqwidth()
+        h = tw.winfo_reqheight()
+
+        new_x, new_y = x, y
+
+        # 右边超出：优先尝试放在控件左侧
+        if new_x + w > screen_w - 5:
+            widget_left = self.widget.winfo_rootx()
+            new_x = widget_left - w - 16
+
+        # 再做一次左右边界夹紧
+        if new_x < 0:
+            new_x = 0
+        if new_x + w > screen_w - 5:
+            new_x = screen_w - w - 5
+
+        # 下边超出：往上抬
+        if new_y + h > screen_h - 5:
+            new_y = screen_h - h - 5
+
+        if new_y < 0:
+            new_y = 0
+
+        return new_x, new_y
+
     def _show(self, event=None):
         if self.tipwindow or not self.text:
             return
 
-        x = self.widget.winfo_rootx() + 20
-        y = self.widget.winfo_rooty() + 20
-
         self.tipwindow = tw = tk.Toplevel(self.widget)
         tw.wm_overrideredirect(True)
-        tw.wm_geometry(f"+{x}+{y}")
 
         label = tk.Label(
             tw,
@@ -465,12 +495,28 @@ class FuturisticTooltip:
         label.config(highlightthickness=1, highlightbackground=COLORS["accent"])
         label.pack(ipadx=4, ipady=3)
 
+        # 初始位置：鼠标右下方，如果没有 event 就用控件右下方
+        if event is not None:
+            base_x = self.widget.winfo_rootx() + event.x + 16
+            base_y = self.widget.winfo_rooty() + event.y + 16
+        else:
+            base_x = self.widget.winfo_rootx() + 16
+            base_y = self.widget.winfo_rooty() + self.widget.winfo_height() + 8
+
+        x, y = self._clamp_to_screen(base_x, base_y, tw)
+        tw.wm_geometry(f"+{int(x)}+{int(y)}")
+
     def _move(self, event):
+        """跟随鼠标移动 tooltip，同样避免出屏幕"""
         if not self.tipwindow:
             return
-        x = self.widget.winfo_rootx() + event.x + 16
-        y = self.widget.winfo_rooty() + event.y + 16
-        self.tipwindow.wm_geometry(f"+{x}+{y}")
+
+        tw = self.tipwindow
+        base_x = self.widget.winfo_rootx() + event.x + 16
+        base_y = self.widget.winfo_rooty() + event.y + 16
+
+        x, y = self._clamp_to_screen(base_x, base_y, tw)
+        tw.wm_geometry(f"+{int(x)}+{int(y)}")
 
     def _hide(self, event=None):
         if self.tipwindow is not None:
@@ -937,15 +983,15 @@ class CircularEconomyDashboard:
         overview = (
             "Dieses Dashboard zeigt, wie sich verschiedene Strategien der Kreislaufwirtschaft "
             "auf einen Wasserzähler auswirken:\n\n"
-            "- Wiederverwendung kompletter Zähler (Reuse)\n"
-            "- Remanufacturing von Impeller und Gehäuse\n"
-            "- Einsatz von Sekundärmaterial durch Recycling\n"
-            "- Wahl des Energiemixes (Solar, Wind, Fossil, Rest)\n\n"
+            "• Wiederverwendung kompletter Zähler (Reuse)\n"
+            "• Remanufacturing von Impeller und Gehäuse\n"
+            "• Einsatz von Recyclingmaterial durch Recycling\n"
+            "• Wahl des Energiemixes (Solar, Wind, Fossil, Rest)\n\n"
             "Rechts werden jeweils die Baseline (Neuprodukt, 0 % Reuse, 0 % Recycling, "
             "100 % Fossil) und Ihr aktuelles Szenario miteinander verglichen – "
             "hinsichtlich Energieverbrauch, CO₂-Emissionen, Gesamtkosten und "
-            "Primärmaterialbedarf (Messing, Kunststoff) pro Wasserzähler.\n\n"
-            "Unten im Bereich 'Scenario Comparison' können bis zu drei Szenarien "
+            "Rohmaterialbedarf (Messing, Kunststoff) pro Wasserzähler.\n\n"
+            "Unten im Bereich „Szenarienvergleich“ können bis zu drei Szenarien "
             "gespeichert und direkt miteinander verglichen werden."
         )
 
@@ -970,7 +1016,7 @@ class CircularEconomyDashboard:
 
     def create_input_panel(self):
         """Create the input parameters panel"""
-        input_panel = ttk.LabelFrame(self.input_column, text="Input Parameters")
+        input_panel = ttk.LabelFrame(self.input_column, text="Eingangsparameter")
         input_panel.pack(fill="both", expand=True)
 
         # We'll add the actual widgets later
@@ -985,7 +1031,7 @@ class CircularEconomyDashboard:
     def create_visualization_panels(self):
         """Create visualization panels for metrics and materials"""
         # Create metrics panel
-        metrics_panel = ttk.LabelFrame(self.viz_column, text="Metrics Comparison", style="TLabelframe")
+        metrics_panel = ttk.LabelFrame(self.viz_column, text="Kennzahlenvergleich", style="TLabelframe")
         metrics_panel.pack(fill="x", expand=False, pady=(0, PAD_Y_PANEL))
 
         FuturisticTooltip(
@@ -1001,14 +1047,14 @@ class CircularEconomyDashboard:
 
         # Create materials panel
         materials_panel = ttk.LabelFrame(
-            self.viz_column, text="Virgin Material Demand (kg)", style="TLabelframe"
+            self.viz_column, text="Rohmaterialbedarf (kg)", style="TLabelframe"
         )
         materials_panel.pack(fill="x", expand=False, pady=(0, PAD_Y_PANEL))
 
         FuturisticTooltip(
             materials_panel,
-            "Primärmaterialbedarf pro Wasserzähler: neu gefördertes Messing und Kunststoff. "
-            "Sekundärmaterial aus Recycling wird hier nicht mitgezählt."
+            "Rohmaterialbedarf pro Wasserzähler: neu gewonnenes Messing und Kunststoff. "
+            "Recyclingmaterial wird hier nicht mitgezählt."
         )
 
         # Create materials chart
@@ -1019,7 +1065,7 @@ class CircularEconomyDashboard:
     def create_livegraph_panel(self):
         """Create panel for saving and comparing records"""
         # old version:  Live Metrics Visualization
-        livegraph_panel = ttk.LabelFrame(self.viz_column, text="Scenario Comparison")
+        livegraph_panel = ttk.LabelFrame(self.viz_column, text="Szenarienvergleich")
         livegraph_panel.pack(fill="both", expand=True, pady=0)
 
         FuturisticTooltip(
@@ -1133,12 +1179,12 @@ class CircularEconomyDashboard:
             elif lbl == "Impeller\nRecycling":
                 FuturisticTooltip(
                     w,
-                    "Anteil des verbliebenen Impeller-Materialbedarfs, der aus Sekundärrohstoffen gedeckt wird."
+                    "Anteil des verbliebenen Impeller-Materialbedarfs, der durch Recyclingmaterial gedeckt wird."
                 )
             elif lbl == "Housing\nRecycling":
                 FuturisticTooltip(
                     w,
-                    "Anteil des verbliebenen Gehäuse-Materialbedarfs, der aus Sekundärrohstoffen gedeckt wird."
+                    "Anteil des verbliebenen Gehäuse-Materialbedarfs, der durch Recyclingmaterial gedeckt wird."
                 )
 
         for col in (0, 1, 2):
@@ -1305,8 +1351,8 @@ class CircularEconomyDashboard:
         calc_text.insert("end", "Formula: co2 = energy * avg_co2_mix * (1 - 0.5 * secondary_share_in_new_build)\n\n")
         calc_text.insert("end", "Where:\n")
         calc_text.insert("end", "- avg_co2_mix = weighted CO₂ factor from the selected energy mix (kg/kWh)\n")
-        calc_text.insert("end", "- secondary_share_in_new_build = secondary_material / new_build_total_material\n")
-        calc_text.insert("end", "- Secondary materials cut emissions by up to 50%\n\n")
+        calc_text.insert("end", "- secondary_share_in_new_build = recycled_material / new_build_total_material\n")
+        calc_text.insert("end", "- Recycled materials (Recyclingmaterial) can cut emissions by up to 50%\n\n")
 
         # Energy cost calculation
         calc_text.insert("end", "3. ENERGY COST\n", "subheading")
@@ -1323,11 +1369,11 @@ class CircularEconomyDashboard:
         calc_text.insert("end", "5. MATERIALS\n", "subheading")
         calc_text.insert(
             "end",
-            "Brass (Virgin): mass_brass_per_housing_kg * new_housing_share * (1 - housing_recycling_rate)\n",
+            "Brass (raw material): mass_brass_per_housing_kg * new_housing_share * (1 - housing_recycling_rate)\n",
         )
         calc_text.insert(
             "end",
-            "Plastic (Virgin): mass_plastic_per_impeller_kg * new_impeller_share * (1 - impeller_recycling_rate)\n\n",
+            "Plastic (raw material): mass_plastic_per_impeller_kg * new_impeller_share * (1 - impeller_recycling_rate)\n\n",
         )
         
         # Configure tags for styling
@@ -1352,7 +1398,7 @@ Input Parameters:
 - Component Remanufacturing (Impeller/Housing): Share of dismantled components that are remanufactured.
     - Impeller: €0.20 new, €0.15 reman, €0.10 reused
     - Housing: €4.00 new, €3.00 reman, €2.00 reused
-- Component Recycling (Impeller/Housing): Percentage of remaining material demand sourced from secondary feedstock.
+- Component Recycling (Impeller/Housing): Percentage of remaining material demand sourced from recycled material (Recyclingmaterial).
 - Energy Mix: Simulated by activating solar and/or wind power
     - Neither active = USA mix (28.01¢/kWh)
     - Solar active = EU mix (36.01¢/kWh)
@@ -1366,9 +1412,9 @@ Energy Consumption:
 
 Material Consumption:
 - Remanufacturing lowers demand in proportion to each component's reman share
-- Recycling supplies secondary feedstock for the remaining new-build fraction
-- Virgin Material Demand chart focuses on brass/plastic that must be mined (virgin feedstock)
-- Secondary feedstock can reduce lifecycle CO₂ emissions by up to 50%
+- Recycling supplies recycled material (Recyclingmaterial) for the remaining new-build fraction
+- Raw Material Demand chart focuses on brass/plastic that must be provided as new raw material (Rohmaterial)
+- Recycled material can reduce lifecycle CO₂ emissions by up to 50%
 
 The dashboard compares the baseline scenario (0% reuse, 0% recycle, USA energy) with your current settings.
 
@@ -1487,7 +1533,8 @@ The Scenario Comparison panel lets you save up to three records and compare thei
 
         # 更新动态显示的能源构成和电价
         self.energy_mix_display.set(
-            f"Aktueller Energiemix: Solar: {s:.0f}%, Wind: {w:.0f}%, Fossil: {f:.0f}%, Rest: {r:.0f}%"
+            f"Aktueller Energiemix – Solar: {s:.0f} %, Wind: {w:.0f} %, "
+            f"Fossil: {f:.0f} %, Rest: {r:.0f} %"
         )
         self.update_price_display()
 
@@ -1731,7 +1778,7 @@ The Scenario Comparison panel lets you save up to three records and compare thei
         )
 
         record = {
-            "label": f"Record {len(self.records_chart.records) + 1}",
+            "label": f"Szenario {len(self.records_chart.records) + 1}",
             "meter_reuse": meter_reuse,
             "reman_impeller": impeller_remanufacturing,
             "reman_housing": housing_remanufacturing,
