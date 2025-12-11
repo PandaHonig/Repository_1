@@ -959,6 +959,7 @@ class CircularEconomyDashboard:
         self._ramp_dn_sec = 10.0                           # Solar 100→0 用时（秒）
 
         # Solar 状态量
+        self._serial_port = None  # 保存 Arduino 串口对象，用于发送 Energiemix
         self._solar_state = 'A'            # 当前 Arduino 状态 A/L/B
         self._last_solar_state = 'A'       # 上一次状态（备用）
         self._manual_lock = False          # 手动调节后锁定，直到 L/B 再次出现
@@ -1539,6 +1540,7 @@ The Scenario Comparison panel lets you save up to three records and compare thei
         self.update_price_display()
 
         self.calculate_and_update()
+        self._send_energy_mix_to_arduino()
     
     def calculate_metrics(
         self,
@@ -1892,6 +1894,7 @@ The Scenario Comparison panel lets you save up to three records and compare thei
                     ser = serial.Serial(p, baudrate=baud, timeout=1)
                     ser.reset_input_buffer()
                     print(f"Serial Port Connection: {p}")
+                    self._serial_port = ser
                     break
                 except Exception:
                     continue
@@ -1942,8 +1945,38 @@ The Scenario Comparison panel lets you save up to three records and compare thei
                 ser.close()
             except:
                 pass
+            self._serial_port = None
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _send_energy_mix_to_arduino(self):
+        """
+        把当前 Energiemix 中的 Solar/Wind 占比通过串口发送给 Arduino。
+
+        发送格式为一行 ASCII 文本，例如：
+            EMIX: solar=0.25,wind=0.35
+
+        其中 solar 和 wind 是 0.0~1.0 之间的浮点数（占比，而不是百分数）。
+        如果串口未连接，则静默忽略。
+        """
+        try:
+            ser = getattr(self, "_serial_port", None)
+            if ser is None:
+                return
+
+            # 使用 update_energy_mix 中已经算好的 self.factors
+            factors = getattr(self, "factors", None)
+            if not factors:
+                return
+
+            solar_share = float(factors.get("solar", 0.0))
+            wind_share  = float(factors.get("wind", 0.0))
+
+            line = f"EMIX: solar={solar_share:.3f},wind={wind_share:.3f}\n"
+            ser.write(line.encode("ascii", errors="ignore"))
+        except Exception as e:
+            # 不要让异常中断 GUI，只打印日志
+            print("发送 Energiemix 到 Arduino 失败:", e)
 
     def _process_arduino_state(self, new_state):
         """处理 Arduino 状态变化"""
