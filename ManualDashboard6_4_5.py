@@ -437,7 +437,7 @@ class FuturisticTooltip:
     - 触控/拖动时自动取消显示
     """
 
-    def __init__(self, widget, text, wraplength=260, delay_ms=100): 
+    def __init__(self, widget, text, wraplength=260, delay_ms=250):
         self.widget = widget
         self.text = text
         self.wraplength = wraplength
@@ -451,8 +451,8 @@ class FuturisticTooltip:
         widget.bind("<Enter>", self._schedule_show, add="+")
         widget.bind("<Leave>", self._hide, add="+")
         widget.bind("<Motion>", self._move, add="+")
-        widget.bind("<ButtonPress-1>", self._cancel_and_hide, add="+")
         widget.bind("<B1-Motion>", self._cancel_and_hide, add="+")
+        widget.bind("<ButtonRelease-1>", self._hide, add="+")
 
     def _clamp_to_screen(self, x, y, tw):
         """根据屏幕和 tooltip 尺寸，把 (x,y) 夹紧在可见范围内"""
