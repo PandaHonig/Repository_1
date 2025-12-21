@@ -206,8 +206,31 @@ int readSmoothAnalog(uint8_t pin, uint8_t n=8) {
 bool parseEmixLine(const String& line, float& solar, float& wind) {
   solar = 0.0f;
   wind  = 0.0f;
-  int matched = sscanf(line.c_str(), "EMIX: solar=%f,wind=%f", &solar, &wind);
-  return (matched == 2);
+
+  int iS = line.indexOf("solar=");
+  int iW = line.indexOf("wind=");
+  if (iS < 0 || iW < 0) return false;
+
+  int comma = line.indexOf(',', iS);
+  if (comma < 0) return false;
+
+  String sSolar = line.substring(iS + 6, comma);
+  String sWind  = line.substring(iW + 5);
+
+  // 允许逗号后有空格：", wind=..."
+  sSolar.trim();
+  sWind.trim();
+
+  solar = sSolar.toFloat();
+  wind  = sWind.toFloat();
+
+  // clamp to 0..1
+  if (solar < 0.0f) solar = 0.0f;
+  if (solar > 1.0f) solar = 1.0f;
+  if (wind  < 0.0f) wind  = 0.0f;
+  if (wind  > 1.0f) wind  = 1.0f;
+
+  return true;
 }
 
 void applyMotorSpeed(AccelStepper& motor,
@@ -494,6 +517,14 @@ void loop() {
         if (parseEmixLine(serialLine, solar, wind)) {
           solar_energy_share = solar;
           wind_energy_share  = wind;
+          Serial.print("RX EMIX OK: solar=");
+          Serial.print(solar_energy_share, 3);
+          Serial.print(" wind=");
+          Serial.println(wind_energy_share, 3);
+        } else {
+          Serial.print("RX EMIX FAIL: '");
+          Serial.print(serialLine);
+          Serial.println("'");
         }
       }
       serialLine = "";
