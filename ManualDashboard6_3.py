@@ -425,6 +425,57 @@ class FuturisticStyle:
               {"sticky": "nswe",
                "children": [("Button.label", {"sticky": "nswe"})]})]
         )
+
+
+class FuturisticTooltip:
+    """Futuristic style tooltip bubble for Tk/ttk widgets."""
+
+    def __init__(self, widget, text, wraplength=260):
+        self.widget = widget
+        self.text = text
+        self.wraplength = wraplength
+        self.tipwindow = None
+
+        widget.bind("<Enter>", self._show)
+        widget.bind("<Leave>", self._hide)
+        widget.bind("<Motion>", self._move)
+
+    def _show(self, event=None):
+        if self.tipwindow or not self.text:
+            return
+
+        x = self.widget.winfo_rootx() + 20
+        y = self.widget.winfo_rooty() + 20
+
+        self.tipwindow = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+
+        label = tk.Label(
+            tw,
+            text=self.text,
+            justify="left",
+            background=COLORS["bg_medium"],
+            foreground=COLORS["text"],
+            relief="solid",
+            borderwidth=1,
+            font=("Segoe UI", 8),
+            wraplength=self.wraplength,
+        )
+        label.config(highlightthickness=1, highlightbackground=COLORS["accent"])
+        label.pack(ipadx=4, ipady=3)
+
+    def _move(self, event):
+        if not self.tipwindow:
+            return
+        x = self.widget.winfo_rootx() + event.x + 16
+        y = self.widget.winfo_rooty() + event.y + 16
+        self.tipwindow.wm_geometry(f"+{x}+{y}")
+
+    def _hide(self, event=None):
+        if self.tipwindow is not None:
+            self.tipwindow.destroy()
+            self.tipwindow = None
 class FuturisticChart(tk.Canvas):
     """A futuristic styled chart"""
     
@@ -773,8 +824,18 @@ class CircularEconomyDashboard:
         # Create top frame for header
         header_frame = ttk.Frame(main_container)
         header_frame.pack(fill="x", pady=(0, 10))
-        
+
         ttk.Label(header_frame, text="Circular Economy Dashboard", style="Title.TLabel").pack(side="left")
+
+        info_btn = ttk.Button(
+            header_frame,
+            text="?",
+            width=3,
+            style="CyberDark.TButton",
+            command=self.show_overview_help,
+        )
+        info_btn.pack(side="right")
+        FuturisticTooltip(info_btn, "Erklärung des Demonstrators und der Kennzahlen anzeigen.")
         
         # Create content frame with two columns
         content_frame = ttk.Frame(main_container)
@@ -871,20 +932,68 @@ class CircularEconomyDashboard:
 
         # 开始定时匀速推进
         self.root.after(self._ramp_interval_ms, self._ramp_tick)
-    
+
+    def show_overview_help(self):
+        overview = (
+            "Dieses Dashboard zeigt, wie sich verschiedene Strategien der Kreislaufwirtschaft "
+            "auf einen Wasserzähler auswirken:\n\n"
+            "- Wiederverwendung kompletter Zähler (Reuse)\n"
+            "- Remanufacturing von Impeller und Gehäuse\n"
+            "- Einsatz von Sekundärmaterial durch Recycling\n"
+            "- Wahl des Energiemixes (Solar, Wind, Fossil, Rest)\n\n"
+            "Rechts werden jeweils die Baseline (Neuprodukt, 0 % Reuse, 0 % Recycling, "
+            "100 % Fossil) und Ihr aktuelles Szenario miteinander verglichen – "
+            "hinsichtlich Energieverbrauch, CO₂-Emissionen, Gesamtkosten und "
+            "Primärmaterialbedarf (Messing, Kunststoff) pro Wasserzähler.\n\n"
+            "Unten im Bereich 'Scenario Comparison' können bis zu drei Szenarien "
+            "gespeichert und direkt miteinander verglichen werden."
+        )
+
+        win = tk.Toplevel(self.root)
+        win.title("Dashboard-Erklärung")
+        win.configure(bg=COLORS["bg_dark"])
+        win.geometry("520x420")
+
+        text = tk.Text(
+            win,
+            wrap="word",
+            bg=COLORS["bg_medium"],
+            fg=COLORS["text"],
+            bd=0,
+            highlightthickness=0,
+            font=("Segoe UI", 9),
+        )
+        text.pack(fill="both", expand=True, padx=10, pady=10)
+
+        text.insert("1.0", overview)
+        text.config(state="disabled")
+
     def create_input_panel(self):
         """Create the input parameters panel"""
         input_panel = ttk.LabelFrame(self.input_column, text="Input Parameters")
         input_panel.pack(fill="both", expand=True)
-        
+
         # We'll add the actual widgets later
         self.input_panel = input_panel
+
+        FuturisticTooltip(
+            input_panel,
+            "Eingangsparameter des Demonstrators: Zirkularitätsquoten (Reuse, Remanufacturing, "
+            "Recycling) und Energiemix für die Berechnung von Energie, CO₂, Kosten und Materialbedarf."
+        )
     
     def create_visualization_panels(self):
         """Create visualization panels for metrics and materials"""
         # Create metrics panel
         metrics_panel = ttk.LabelFrame(self.viz_column, text="Metrics Comparison", style="TLabelframe")
         metrics_panel.pack(fill="x", expand=False, pady=(0, PAD_Y_PANEL))
+
+        FuturisticTooltip(
+            metrics_panel,
+            "Vergleich der Baseline (rot) mit der aktuellen Einstellung (blau) "
+            "für Energieverbrauch, Gesamtkosten (Komponenten + Energie) "
+            "und CO₂-Emissionen pro Wasserzähler."
+        )
 
         # Create metrics chart
         self.metrics_chart = ComparisonChart(metrics_panel, width=CHART_W_RIGHT, height=CHART_H_METRICS)
@@ -896,6 +1005,12 @@ class CircularEconomyDashboard:
         )
         materials_panel.pack(fill="x", expand=False, pady=(0, PAD_Y_PANEL))
 
+        FuturisticTooltip(
+            materials_panel,
+            "Primärmaterialbedarf pro Wasserzähler: neu gefördertes Messing und Kunststoff. "
+            "Sekundärmaterial aus Recycling wird hier nicht mitgezählt."
+        )
+
         # Create materials chart
         self.materials_chart = ComparisonChart(materials_panel, width=CHART_W_RIGHT, height=CHART_H_MATERIALS)
         self.materials_chart.pack(fill="x", expand=False, padx=PAD_X, pady=(0, PAD_Y_SMALL))
@@ -906,6 +1021,12 @@ class CircularEconomyDashboard:
         # old version:  Live Metrics Visualization
         livegraph_panel = ttk.LabelFrame(self.viz_column, text="Scenario Comparison")
         livegraph_panel.pack(fill="both", expand=True, pady=0)
+
+        FuturisticTooltip(
+            livegraph_panel,
+            "Hier können bis zu drei Szenarien gespeichert und bezüglich Energie, CO₂, "
+            "Kosten sowie Messing- und Kunststoffbedarf miteinander verglichen werden."
+        )
 
         control_frame = ttk.Frame(livegraph_panel)
         control_frame.pack(side="top", fill="x", padx=PAD_X, pady=(0, PAD_Y_SMALL))
@@ -994,6 +1115,32 @@ class CircularEconomyDashboard:
             w.grid(row=r, column=c, padx=6, pady=4, sticky="w")
             self.knob_widgets.append(w)
 
+            if "Wasserzähler" in lbl:
+                FuturisticTooltip(
+                    w,
+                    "Anteil kompletter Wasserzähler, die ohne Demontage weiterverwendet werden."
+                )
+            elif lbl == "Impeller\nRemanufacturing":
+                FuturisticTooltip(
+                    w,
+                    "Anteil der Impeller, die nach Demontage aufgearbeitet und wieder eingesetzt werden."
+                )
+            elif lbl == "Housing\nRemanufacturing":
+                FuturisticTooltip(
+                    w,
+                    "Anteil der Gehäuse, die nach Demontage aufgearbeitet und wieder eingesetzt werden."
+                )
+            elif lbl == "Impeller\nRecycling":
+                FuturisticTooltip(
+                    w,
+                    "Anteil des verbliebenen Impeller-Materialbedarfs, der aus Sekundärrohstoffen gedeckt wird."
+                )
+            elif lbl == "Housing\nRecycling":
+                FuturisticTooltip(
+                    w,
+                    "Anteil des verbliebenen Gehäuse-Materialbedarfs, der aus Sekundärrohstoffen gedeckt wird."
+                )
+
         for col in (0, 1, 2):
             controls_grid.grid_columnconfigure(col, weight=1)
 
@@ -1016,9 +1163,22 @@ class CircularEconomyDashboard:
 
         mix_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
         mix_frame.pack(fill="x", padx=10, pady=5)
+
+        FuturisticTooltip(
+            mix_frame,
+            "Der Energiemix beeinflusst sowohl die CO₂-Intensität (g CO₂/kWh) "
+            "als auch den Strompreis (€/kWh) in den Berechnungen. "
+            "Der Anteil 'Rest' umfasst übrige Quellen mit mittlerer CO₂-Intensität."
+        )
         # ——— 电价面板 ———
         price_frame = ttk.Frame(mix_frame, style="Panel.TFrame")
         price_frame.pack(fill="x", pady=5)
+
+        FuturisticTooltip(
+            price_frame,
+            "Wenn aktiviert, wird ein Durchschnittspreis aus dem ENTSO-E Day-Ahead-Markt "
+            "geladen und an den eingestellten Energiemix angepasst."
+        )
 
         ttk.Checkbutton(
             price_frame,
