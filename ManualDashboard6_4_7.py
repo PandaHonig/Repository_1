@@ -2015,15 +2015,11 @@ The Scenario Comparison panel lets you save up to three records and compare thei
             if ser is None:
                 return
 
-            # 使用 update_energy_mix 中已经算好的 self.factors
-            factors = getattr(self, "factors", None)
-            if not factors:
-                return
+            # 向 Arduino 发送“滑块的绝对百分比”（0-100），内部计算仍使用归一化 share
+            solar_abs = clamp01(float(self.solar_pct.get()) / 100.0)
+            wind_abs  = clamp01(float(self.wind_pct.get()) / 100.0)
 
-            solar_share = float(factors.get("solar", 0.0))
-            wind_share  = float(factors.get("wind", 0.0))
-
-            line = f"EMIX: solar={solar_share:.3f},wind={wind_share:.3f}\n"
+            line = f"EMIX: solar={solar_abs:.3f},wind={wind_abs:.3f}\n"
             ser.write(line.encode("ascii", errors="ignore"))
         except Exception as e:
             # 不要让异常中断 GUI，只打印日志
