@@ -139,6 +139,10 @@ const uint8_t LED_GLOBAL_BRIGHTNESS = 80;
 const float LED_FLOW_SPEED_MAX    = 1.0f;
 const float LED_ENERGY_SPEED_MAX  = 12.0f;
 
+const int8_t LED1_DIR_SIGN = -1;
+const int8_t LED4_DIR_SIGN = -1;
+const int8_t LED5_DIR_SIGN = -1;
+
 CRGB leds1[NUM_LEDS_LED1];
 CRGB leds2[NUM_LEDS_LED2];
 CRGB leds3[NUM_LEDS_LED3];
@@ -299,15 +303,17 @@ void updateLedsFromRates()
       * (1.0f - meter_reuse_rate)
       * (1.0f - housing_remanufacturing_rate);
 
-  led1_impeller_pos += speed_led1_impeller * dt;
-  led1_housing_pos  += speed_led1_housing  * dt;
+  led1_impeller_pos += speed_led1_impeller * LED1_DIR_SIGN * dt;
+  led1_housing_pos  += speed_led1_housing  * LED1_DIR_SIGN * dt;
 
-  if (led1_impeller_pos >= NUM_LEDS_LED1) led1_impeller_pos -= NUM_LEDS_LED1;
-  if (led1_housing_pos  >= NUM_LEDS_LED1) led1_housing_pos  -= NUM_LEDS_LED1;
+  while (led1_impeller_pos >= NUM_LEDS_LED1) led1_impeller_pos -= NUM_LEDS_LED1;
+  while (led1_housing_pos  >= NUM_LEDS_LED1) led1_housing_pos  -= NUM_LEDS_LED1;
+  while (led1_impeller_pos < 0) led1_impeller_pos += NUM_LEDS_LED1;
+  while (led1_housing_pos  < 0) led1_housing_pos  += NUM_LEDS_LED1;
 
   fill_solid(leds1, NUM_LEDS_LED1, CRGB::Black);
-  leds1[(int)led1_impeller_pos] = CRGB::Blue;
-  leds1[(int)led1_housing_pos]  = CRGB::Cyan;
+  leds1[(int)led1_impeller_pos] = CRGB::White;
+  leds1[(int)led1_housing_pos]  = CRGB::Yellow;
 
   float speed_led2_impeller = LED_FLOW_SPEED_MAX
       * (1.0f - meter_reuse_rate)
@@ -326,7 +332,7 @@ void updateLedsFromRates()
   if (led2_housing_pos  >= NUM_LEDS_LED2) led2_housing_pos  -= NUM_LEDS_LED2;
 
   fill_solid(leds2, NUM_LEDS_LED2, CRGB::Black);
-  leds2[(int)led2_impeller_pos] = CRGB::Green;
+  leds2[(int)led2_impeller_pos] = CRGB::White;
   leds2[(int)led2_housing_pos]  = CRGB::Yellow;
 
   float waste_impeller_fraction =
@@ -350,8 +356,9 @@ void updateLedsFromRates()
 
   float speed_led4_raw = speed_led3_waste;
 
-  led4_raw_pos += speed_led4_raw * dt;
-  if (led4_raw_pos >= NUM_LEDS_LED4) led4_raw_pos -= NUM_LEDS_LED4;
+  led4_raw_pos += speed_led4_raw * LED4_DIR_SIGN * dt;
+  while (led4_raw_pos >= NUM_LEDS_LED4) led4_raw_pos -= NUM_LEDS_LED4;
+  while (led4_raw_pos < 0) led4_raw_pos += NUM_LEDS_LED4;
 
   fill_solid(leds4, NUM_LEDS_LED4, CRGB::Black);
   leds4[(int)led4_raw_pos] = CRGB(128, 128, 128);
@@ -359,11 +366,13 @@ void updateLedsFromRates()
   float speed_led5_solar = LED_ENERGY_SPEED_MAX * solar_energy_share;
   float speed_led5_wind  = LED_ENERGY_SPEED_MAX * wind_energy_share;
 
-  led5_solar_pos += speed_led5_solar * dt;
-  led5_wind_pos  += speed_led5_wind  * dt;
+  led5_solar_pos += speed_led5_solar * LED5_DIR_SIGN * dt;
+  led5_wind_pos  += speed_led5_wind  * LED5_DIR_SIGN * dt;
 
-  if (led5_solar_pos >= NUM_LEDS_LED5) led5_solar_pos -= NUM_LEDS_LED5;
-  if (led5_wind_pos  >= NUM_LEDS_LED5) led5_wind_pos  -= NUM_LEDS_LED5;
+  while (led5_solar_pos >= NUM_LEDS_LED5) led5_solar_pos -= NUM_LEDS_LED5;
+  while (led5_wind_pos  >= NUM_LEDS_LED5) led5_wind_pos  -= NUM_LEDS_LED5;
+  while (led5_solar_pos < 0) led5_solar_pos += NUM_LEDS_LED5;
+  while (led5_wind_pos  < 0) led5_wind_pos  += NUM_LEDS_LED5;
 
   fill_solid(leds5, NUM_LEDS_LED5, CRGB::Black);
   leds5[(int)led5_solar_pos] = CRGB::Orange;
