@@ -1,4 +1,4 @@
-// Solar：A0, DEFAULT(≈5V)；Wind：A1, INTERNAL(≈1.1V)
+// Solar: A0, DEFAULT(~5V); Wind: A1, INTERNAL(~1.1V)
 
 #include <Arduino.h>
 #include <AccelStepper.h>
@@ -18,7 +18,7 @@ const uint8_t PIN_POT4 = A5;
 const uint8_t PIN_POT5 = A6;
 
 // ---------- Motor Pins ----------
-// Motor 1..7: STEP, DIR, ENABLE 引脚  1<7 5<6
+// Motor 1..7: STEP, DIR, ENABLE pins; 1<7 5<6
 const uint8_t MOTOR7_STEP_PIN   = 22;
 const uint8_t MOTOR7_DIR_PIN    = 23;
 const uint8_t MOTOR7_ENABLE_PIN = 24;
@@ -65,23 +65,23 @@ const uint16_t SOLAR_SAMPLE_MS = 50;
 const uint16_t SOLAR_CAL_MS    = 3000;
 const float    BASE_ALPHA  = 0.0005f;
 const float    NOISE_ALPHA = 0.05f;
-const float    NOISE_MAX   = 30.0f;     // 恢复到 30（不是 12！）
-const float    NOISE_CLIP_IN = 20.0f;   // 噪声裁剪
-const int      MIN_DELTA_UP  = 20;      // 恢复绝对最小阈值  光照强度 Lichtstärkeanpassung Licht 50 30 28 25 20
-const int      MIN_DELTA_DN  = 60;      // Lichtstärkeanpassung                 
-const float    K_NOISE       = 7.5f;    // 噪声倍数 8.0 7.0 6.0
-const float    REL_FRAC      = 0.12f;   // 相对阈值 0.15 0.13 0.12 0.1
-const int      HYST          = 12;      // 滞回
+const float    NOISE_MAX   = 30.0f;     // Restore to 30 (not 12).
+const float    NOISE_CLIP_IN = 20.0f;   // Noise clamp.
+const int      MIN_DELTA_UP  = 20;      // Restore absolute minimum threshold; light tuning values.
+const int      MIN_DELTA_DN  = 60;      // Light level tuning.
+const float    K_NOISE       = 7.5f;    // Noise multiplier tuning values.
+const float    REL_FRAC      = 0.12f;   // Relative threshold tuning values.
+const int      HYST          = 12;      // Hysteresis.
 
 enum SolarStateChar : char { AMBIENT='A', LAMP='L', BLOCKED='B' };
 
 float baseline   = 0.0f;
 float raw_ema    = 0.0f;
-float noise_ema  = 5.0f;  // 修复：增大初始噪声估计
+float noise_ema  = 5.0f;  // Fix: increase initial noise estimate.
 char  state      = AMBIENT;
 unsigned long tSolar = 0, tSolarPrint = 0;
 
-// ★ 修复：恢复基线更新控制
+// Fix: restore baseline update control.
 uint16_t baseline_update_counter = 0;
 const uint16_t BASELINE_UPDATE_INTERVAL = 5;
 
@@ -97,16 +97,16 @@ float wind_v_ema    = 0.0f;
 unsigned long tWind = 0, tWindPrint = 0;
 
 // ===================== Potentiometers (5x) =====================
-const unsigned POT_PRINT_MS = 100;  // 每 100 ms 打印一次 Poti 数值
+const unsigned POT_PRINT_MS = 100;  // Print Poti values every 100 ms.
 unsigned long tPotPrint = 0;
 
-// ===================== 分时窗口采样控制 =====================
+// ===================== Time-sliced sampling control =====================
 enum Window { W_SOLAR, W_WIND };
 Window curWin = W_SOLAR;
 const unsigned long WINDOW_MS = 300;
 unsigned long tWinStart = 0;
 
-// 记录当前 analogReference 使用的是哪种模式
+// Track the active analogReference mode.
 enum AnalogRefMode {
   REF_DEFAULT,
   REF_INTERNAL1V1
@@ -114,26 +114,26 @@ enum AnalogRefMode {
 
 volatile AnalogRefMode gAnalogRefMode = REF_DEFAULT;
 
-// ===================== Motor / LED 全局变量 =====================
-// Poti 映射得到的 rate（0.0 ~ 1.0）
+// ===================== Motor / LED globals =====================
+// Rates from Poti mapping (0.0 to 1.0).
 float meter_reuse_rate                = 0.0f;
 float impeller_remanufacturing_rate   = 0.0f;
 float housing_remanufacturing_rate    = 0.0f;
 float impeller_recycling_rate         = 0.0f;
 float housing_recycling_rate          = 0.0f;
 
-// 从 Python 传来的 Energiemix（0.0 ~ 1.0）
+// Energiemix received from Python (0.0 to 1.0).
 float solar_energy_share = 0.0f;
 float wind_energy_share  = 0.0f;
 
-// 步进电机参数
+// Stepper motor parameters.
 const float MOTOR_MAX_RPM = 200.0f;
 const float STEPS_PER_REVOLUTION = 400.0f; // full-step 200 half 400
 const float MOTOR_MAX_STEPS_PER_SECOND =
     MOTOR_MAX_RPM / 60.0f * STEPS_PER_REVOLUTION;
 const float MIN_STEPS_PER_SECOND_FOR_ENABLE = 1.0f;
 
-// LED 动画参数
+// LED animation parameters.
 const uint8_t LED_GLOBAL_BRIGHTNESS = 50;
 const float LED_FLOW_SPEED_MAX    = 8.0f;
 const float LED_ENERGY_SPEED_MAX  = 12.0f;
@@ -162,7 +162,7 @@ float led5_wind_pos     = 0.0f;
 
 unsigned long last_led_update_ms = 0;
 
-// 步进电机实例
+// Stepper motor instances.
 AccelStepper motor1(AccelStepper::DRIVER, MOTOR1_STEP_PIN, MOTOR1_DIR_PIN);
 AccelStepper motor2(AccelStepper::DRIVER, MOTOR2_STEP_PIN, MOTOR2_DIR_PIN);
 AccelStepper motor3(AccelStepper::DRIVER, MOTOR3_STEP_PIN, MOTOR3_DIR_PIN);
@@ -171,7 +171,7 @@ AccelStepper motor5(AccelStepper::DRIVER, MOTOR5_STEP_PIN, MOTOR5_DIR_PIN);
 AccelStepper motor6(AccelStepper::DRIVER, MOTOR6_STEP_PIN, MOTOR6_DIR_PIN);
 AccelStepper motor7(AccelStepper::DRIVER, MOTOR7_STEP_PIN, MOTOR7_DIR_PIN);
 
-// ---------- 工具函数 ----------
+// ---------- Utilities ----------
 static inline void warmup(uint8_t pin, uint8_t aref) {
   analogReference(aref);
   if (aref == DEFAULT) {
@@ -199,7 +199,7 @@ static inline float adcToVolt(int adc, float vref){
   return adc*(vref/1023.0f);
 }
 
-// ★ 修复：添加平滑读取函数（来自 Solar_2.ino）
+// Fix: add smooth read helper (from Solar_2.ino).
 int readSmoothAnalog(uint8_t pin, uint8_t n=8) {
   long acc = 0;
   for (uint8_t i=0; i<n; ++i) acc += analogRead(pin);
@@ -220,7 +220,7 @@ bool parseEmixLine(const String& line, float& solar, float& wind) {
   String sSolar = line.substring(iS + 6, comma);
   String sWind  = line.substring(iW + 5);
 
-  // 允许逗号后有空格：", wind=..."
+  // Allow space after comma: ", wind=..."
   sSolar.trim();
   sWind.trim();
 
@@ -380,7 +380,7 @@ void updateLedsFromRates()
   FastLED.show();
 }
 
-// 读取 5 个 Poti，并输出一行串口数据：POTS: v1,v2,v3,v4,v5
+// Read 5 Potis and print one serial line: POTS: v1,v2,v3,v4,v5
 void readAndPrintPots() {
   AnalogRefMode prevRef = gAnalogRefMode;
 
@@ -425,24 +425,24 @@ void setup() {
   Serial.begin(9600);
   while(!Serial){}
 
-  // —— Solar：校准（使用 Solar_2.ino 的方法） —— 
+  // -- Solar: calibration (use Solar_2.ino method) --
   curWin = W_SOLAR;
   tWinStart = millis();
 
   {
-    warmup(PIN_SOLAR, DEFAULT);       // 5V参考 + 预热
+    warmup(PIN_SOLAR, DEFAULT);       // 5V reference plus warmup.
     unsigned long t0 = millis();
     long acc=0, cnt=0;
     while(millis() - t0 < SOLAR_CAL_MS){
-      acc += readSmoothAnalog(PIN_SOLAR, 8);  // ★ 使用平滑读取
+      acc += readSmoothAnalog(PIN_SOLAR, 8);  // Fix: use smooth read.
       cnt++;
       delay(10);
     }
     baseline = cnt ? (float)acc/cnt : 0.0f;
     raw_ema  = baseline;
-    noise_ema= 5.0f;  // ★ 修复：更大的初始噪声估计
+    noise_ema= 5.0f;  // Fix: larger initial noise estimate.
     state    = AMBIENT;
-    baseline_update_counter = 0;  // ★ 修复：初始化计数器
+    baseline_update_counter = 0;  // Fix: initialize counter.
     tSolar = tSolarPrint = millis();
 
     Serial.print("Initial baseline: "); Serial.println(baseline);
@@ -451,7 +451,7 @@ void setup() {
     Serial.print(",state=");Serial.println((char)state);
   }
 
-  // —— Wind：初始化 —— 
+  // -- Wind: init --
   warmup(PIN_WIND, INTERNAL1V1);
   {
     int   adc = analogReadAvg(PIN_WIND, AVG_N);
@@ -543,13 +543,13 @@ void loop() {
     }
   }
 
-  // —— 定期读取 5 个 Poti 并发送到串口 ——
+  // -- Periodically read 5 Potis and send to serial --
   if (now - tPotPrint >= POT_PRINT_MS) {
     tPotPrint = now;
     readAndPrintPots();
   }
 
-  // —— 窗口切换 ——
+  // -- Window switch --
   if(now - tWinStart >= WINDOW_MS){
     tWinStart = now;
     if(curWin == W_SOLAR){
@@ -563,38 +563,38 @@ void loop() {
     }
   }
 
-  // ================= Solar 窗口（使用 Solar_2.ino 的改进逻辑） =================
+  // ================= Solar window (Solar_2.ino logic) =================
   if(curWin == W_SOLAR){
     if(now - tSolar >= SOLAR_SAMPLE_MS){
       tSolar = now;
 
-      int   raw_val = readSmoothAnalog(PIN_SOLAR, 8);  // ★ 修复：使用平滑读取
+      int   raw_val = readSmoothAnalog(PIN_SOLAR, 8);  // Fix: use smooth read.
       float raw = (float)raw_val;
       float diff = raw - baseline;
 
-      // ★ 修复：仅在 AMBIENT 时更新噪声（来自 Solar_2.ino）
+      // Fix: update noise only in AMBIENT (from Solar_2.ino).
       if (state == AMBIENT) {
         float nd = fabs(diff);
-        if (nd > NOISE_CLIP_IN) nd = NOISE_CLIP_IN;  // ★ 修复：噪声裁剪
+        if (nd > NOISE_CLIP_IN) nd = NOISE_CLIP_IN;  // Fix: noise clamp.
         noise_ema = (1.0f - NOISE_ALPHA) * noise_ema + NOISE_ALPHA * nd;
         if (noise_ema > NOISE_MAX) noise_ema = NOISE_MAX;
       }
 
-      // ★ 修复：使用 Solar_2.ino 的完整阈值计算
+      // Fix: use full threshold calc from Solar_2.ino.
       float rel_base = baseline;
       if (rel_base < 60.0f) rel_base = 60.0f;
       float rel_th = REL_FRAC * rel_base;
       float up_th = max((float)MIN_DELTA_UP, max(K_NOISE * noise_ema, rel_th));
       float dn_th = max((float)MIN_DELTA_DN, max(K_NOISE * noise_ema, rel_th));
 
-      // ★ 修复：使用 Solar_2.ino 的状态机逻辑
+      // Fix: use Solar_2.ino state machine.
       char newState = state;
       switch (state) {
         case AMBIENT:
           if (diff > up_th)        newState = LAMP;
           else if (diff < -dn_th)  newState = BLOCKED;
           else {
-            // ★ 修复：恢复基线更新控制
+            // Fix: restore baseline update control.
             baseline_update_counter++;
             if (baseline_update_counter >= BASELINE_UPDATE_INTERVAL) {
               baseline = (1.0f - BASE_ALPHA) * baseline + BASE_ALPHA * raw;
@@ -604,17 +604,17 @@ void loop() {
           break;
          
         case LAMP:
-          if (diff < up_th - HYST)  newState = AMBIENT;  // ★ 修复：使用滞回
+          if (diff < up_th - HYST)  newState = AMBIENT;  // Fix: use hysteresis.
           break;
          
         case BLOCKED:
-          if (diff > -(dn_th - HYST)) newState = AMBIENT;  // ★ 修复：使用滞回
+          if (diff > -(dn_th - HYST)) newState = AMBIENT;  // Fix: use hysteresis.
           break;
       }
 
-      // ★ 修复：状态转换时的噪声处理（来自 Solar_2.ino）
+      // Fix: noise handling on transitions (from Solar_2.ino).
       if ((state == LAMP || state == BLOCKED) && newState == AMBIENT) {
-        noise_ema = max(2.0f, noise_ema * 0.7f);  // 不要太激进
+        noise_ema = max(2.0f, noise_ema * 0.7f);  // Do not be too aggressive.
       }
 
       bool changed = (newState != state);
@@ -629,7 +629,7 @@ void loop() {
     }
   }
 
-  // ================= Wind 窗口（保持不变） =================
+  // ================= Wind window (unchanged) =================
   else { // curWin == W_WIND
     if(now - tWind >= SOLAR_SAMPLE_MS){
       tWind = now;
