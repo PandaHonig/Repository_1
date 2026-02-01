@@ -2032,9 +2032,6 @@ The Scenario Comparison panel lets you save up to three records and compare thei
     def _ramp_tick(self):
         """定时推进 Solar/Wind 进度"""
         try:
-            solar_changed = False
-            wind_changed = False
-
             current_value = float(self.solar_pct.get())
             if self._auto_ramping and not self._manual_lock:
                 target = float(self._solar_target)
@@ -2051,11 +2048,10 @@ The Scenario Comparison panel lets you save up to three records and compare thei
 
                     self._auto_updating = True
                     try:
-                        self.solar_pct.set(new_val)
-                        self.solar_val_label.config(text=f"{new_val:.0f}%")
+                        # 使用统一入口以触发归一化逻辑
+                        self.on_slider_change('solar', new_val)
                     finally:
                         self._auto_updating = False
-                    solar_changed = True
                 else:
                     if self._auto_ramping:
                         print(f"到达目标值 {target:.1f}%，停止推进")
@@ -2072,18 +2068,14 @@ The Scenario Comparison panel lets you save up to three records and compare thei
 
                     self._wind_auto_updating = True
                     try:
-                        self.wind_pct.set(new_wind)
-                        self.wind_val_label.config(text=f"{new_wind:.0f}%")
+                        # 通过统一逻辑更新以保持总和不超过 100%
+                        self.on_slider_change('wind', new_wind)
                     finally:
                         self._wind_auto_updating = False
-                    wind_changed = True
                 else:
                     if self._wind_auto_ramping:
                         print(f"风能到达目标值 {target_wind:.1f}%，停止推进")
                         self._wind_auto_ramping = False
-
-            if solar_changed or wind_changed:
-                self.update_energy_mix()
         except Exception as e:
             print("ramp出错：", e)
         finally:
