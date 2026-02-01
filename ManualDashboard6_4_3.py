@@ -361,9 +361,10 @@ class FuturisticStyle:
         style.configure("Section.TLabel",  font=("Segoe UI", SECTION_FONT_SIZE, "bold"),  foreground=COLORS["text"], background=COLORS["bg_medium"])
         style.configure("Value.TLabel",    font=("Segoe UI", VALUE_FONT_SIZE, "bold"),    foreground=COLORS["text"], background=COLORS["bg_medium"])
         style.configure("Accent.TLabel", foreground=COLORS["accent"], background=COLORS["bg_medium"])
-        
+
         # Configure checkbox
         style.configure("TCheckbutton", background=COLORS["bg_medium"], foreground=COLORS["text"])
+        style.configure("Big.TCheckbutton", font=("Segoe UI", 12, "bold"), padding=(12, 10))
         
         # Configure notebook (tabs)
         style.configure("TNotebook", background=COLORS["bg_dark"], borderwidth=0)
@@ -1232,7 +1233,8 @@ class CircularEconomyDashboard:
             price_frame,
             text="Echtzeit-Strompreisen",
             variable=self.use_realtime_price,
-            command=self.on_realtime_price_toggle
+            command=self.on_realtime_price_toggle,
+            style="Big.TCheckbutton"
         ).pack(side="left")
         # Create entry for realtime price
         self.realtime_price_entry = ttk.Entry(
