@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Created on Sat Mar 15 11:19:52 2025
-Baseline: 0 % reuse, 0 % recycle, 100 % thermal (worst-case scenario)
+Baseline: 0 % reuse, 0 % recycle, 100 % fossil (worst-case scenario)
 @author: tobis
 """
 
@@ -25,9 +25,18 @@ YOUR_API_KEY = "46b6d9c5-1c8a-4dc0-bb0b-eaf380ec0f6a"
 
 # Energy mix CO2 factors (g CO2/kWh)
 ENERGY_SOURCES = {
-    "solar": {"co2": 50, "cost": 0.12},   # gCO2/kWh, €/kWh
-    "wind": {"co2": 20, "cost": 0.10},
-    "thermal": {"co2": 800, "cost": 0.18}
+    "solar":  {"co2": 50,  "cost": 0.12},   # gCO2/kWh, €/kWh
+    "wind":   {"co2": 20,  "cost": 0.10},
+    "fossil": {"co2": 800, "cost": 0.18},
+    "rest":   {"co2": 100, "cost": 0.15}   # estimated values
+}
+
+# Standard energy mix used for price correction
+STANDARD_ENERGY_MIX = {
+    "solar":  0.13,
+    "wind":   0.31,
+    "fossil": 0.47,
+    "rest":   0.09
 }
 
 # Component costs
@@ -674,9 +683,10 @@ class CircularEconomyDashboard:
         self.housing_var = tk.DoubleVar(value=0)
         self.material_recycling_var = tk.DoubleVar(value=0)
         
-        self.solar_pct = tk.DoubleVar(value=33)  # 默认33%
-        self.wind_pct = tk.DoubleVar(value=27)
-        self.thermal_pct = tk.DoubleVar(value=40)
+        self.solar_pct = tk.DoubleVar(value=int(STANDARD_ENERGY_MIX["solar"] * 100))
+        self.wind_pct = tk.DoubleVar(value=int(STANDARD_ENERGY_MIX["wind"] * 100))
+        self.fossil_pct = tk.DoubleVar(value=int(STANDARD_ENERGY_MIX["fossil"] * 100))
+        self.rest_pct = tk.DoubleVar(value=int(STANDARD_ENERGY_MIX["rest"] * 100))
         self.use_realtime_price = tk.BooleanVar(value=False)
         self.realtime_price = tk.DoubleVar(value=0.15)
         self.price_source = tk.StringVar(value="本地加权均值")
@@ -906,7 +916,7 @@ class CircularEconomyDashboard:
         mix_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
         mix_frame.pack(fill="x", padx=10, pady=5)
         # ——— 电价面板 ———
-        price_frame = ttk.Frame(mix_frame)
+        price_frame = ttk.Frame(mix_frame, style="Panel.TFrame")
         price_frame.pack(fill="x", pady=5)
 
         ttk.Checkbutton(
@@ -922,7 +932,7 @@ class CircularEconomyDashboard:
             width=6
         )
         self.realtime_price_entry.pack(side="left", padx=(10,2))
-        ttk.Label(price_frame, text="€/kWh").pack(side="left")
+        ttk.Label(price_frame, text="€/kWh", style="Panel.TLabel").pack(side="left")
 
         # 默认禁用，只有勾选"使用实时电价"才可编辑
         self.realtime_price_entry.config(state="disabled")
@@ -932,7 +942,8 @@ class CircularEconomyDashboard:
         solar_row.pack(fill="x", pady=2)
         ttk.Label(solar_row, text="阳Solar (%)", style="Value.TLabel", width=10).pack(side="left")
         solar_scale = ttk.Scale(solar_row, from_=0, to=100, orient="horizontal",
-            variable=self.solar_pct, command=lambda v: self.on_slider_change('solar', float(v)))
+            variable=self.solar_pct, command=lambda v: self.on_slider_change('solar', float(v)),
+            style="Futuristic.Horizontal.TScale")
         solar_scale.pack(side="left", fill="x", expand=True, padx=5)
         self.solar_val_label = ttk.Label(solar_row, text=f"{self.solar_pct.get():.0f}%", style="Value.TLabel", width=4)
         self.solar_val_label.pack(side="right")
@@ -942,20 +953,33 @@ class CircularEconomyDashboard:
         wind_row.pack(fill="x", pady=2)
         ttk.Label(wind_row, text="风Wind (%)", style="Value.TLabel", width=10).pack(side="left")
         wind_scale = ttk.Scale(wind_row, from_=0, to=100, orient="horizontal",
-            variable=self.wind_pct, command=lambda v: self.on_slider_change('wind', float(v)))
+            variable=self.wind_pct, command=lambda v: self.on_slider_change('wind', float(v)),
+            style="Futuristic.Horizontal.TScale")
         wind_scale.pack(side="left", fill="x", expand=True, padx=5)
         self.wind_val_label = ttk.Label(wind_row, text=f"{self.wind_pct.get():.0f}%", style="Value.TLabel", width=4)
         self.wind_val_label.pack(side="right")
 
-        # 火力
-        thermal_row = ttk.Frame(mix_frame, style="Panel.TFrame")
-        thermal_row.pack(fill="x", pady=2)
-        ttk.Label(thermal_row, text="火Kohl (%)", style="Value.TLabel", width=10).pack(side="left")
-        thermal_scale = ttk.Scale(thermal_row, from_=0, to=100, orient="horizontal",
-            variable=self.thermal_pct, command=lambda v: self.on_slider_change('thermal', float(v)))
-        thermal_scale.pack(side="left", fill="x", expand=True, padx=5)
-        self.thermal_val_label = ttk.Label(thermal_row, text=f"{self.thermal_pct.get():.0f}%", style="Value.TLabel", width=4)
-        self.thermal_val_label.pack(side="right")
+        # 化石能源
+        fossil_row = ttk.Frame(mix_frame, style="Panel.TFrame")
+        fossil_row.pack(fill="x", pady=2)
+        ttk.Label(fossil_row, text="化Fossil (%)", style="Value.TLabel", width=10).pack(side="left")
+        fossil_scale = ttk.Scale(fossil_row, from_=0, to=100, orient="horizontal",
+            variable=self.fossil_pct, command=lambda v: self.on_slider_change('fossil', float(v)),
+            style="Futuristic.Horizontal.TScale")
+        fossil_scale.pack(side="left", fill="x", expand=True, padx=5)
+        self.fossil_val_label = ttk.Label(fossil_row, text=f"{self.fossil_pct.get():.0f}%", style="Value.TLabel", width=4)
+        self.fossil_val_label.pack(side="right")
+
+        # 其他
+        rest_row = ttk.Frame(mix_frame, style="Panel.TFrame")
+        rest_row.pack(fill="x", pady=2)
+        ttk.Label(rest_row, text="其Rest (%)", style="Value.TLabel", width=10).pack(side="left")
+        rest_scale = ttk.Scale(rest_row, from_=0, to=100, orient="horizontal",
+            variable=self.rest_pct, command=lambda v: self.on_slider_change('rest', float(v)),
+            style="Futuristic.Horizontal.TScale")
+        rest_scale.pack(side="left", fill="x", expand=True, padx=5)
+        self.rest_val_label = ttk.Label(rest_row, text=f"{self.rest_pct.get():.0f}%", style="Value.TLabel", width=4)
+        self.rest_val_label.pack(side="right")
 
         # 总和校验
         self.energy_sum_label = ttk.Label(mix_frame, text="合计: 100%", style="Value.TLabel")
@@ -1091,39 +1115,25 @@ The Live Graph tab shows how metrics change over time as you adjust the paramete
         self.calculate_and_update()
     
     def on_slider_change(self, changed, new_value):
-        # changed: 'solar'/'wind'/'thermal'
-        # new_value: float, 用户希望的新值
-        values = {
-            'solar': self.solar_pct.get(),
-            'wind': self.wind_pct.get(),
-            'thermal': self.thermal_pct.get()
-        }
+        # changed: one of the energy sources
+        sources = ['solar', 'wind', 'fossil', 'rest']
+        values = {s: getattr(self, f"{s}_pct").get() for s in sources}
         values[changed] = new_value
         total = sum(values.values())
-        if total <= 100:
-            # 不超限，直接赋值
-            self.solar_pct.set(values['solar'])
-            self.wind_pct.set(values['wind'])
-            self.thermal_pct.set(values['thermal'])
-        else:
-            # 超限，需要调整其他两个
-            others = [k for k in values if k != changed]
-            other_sum = values[others[0]] + values[others[1]]
+        if total > 100:
+            others = [s for s in sources if s != changed]
+            other_sum = sum(values[o] for o in others)
             if other_sum == 0:
-                # 其他两个都是0，当前最大只能到100
                 values[changed] = 100
-                values[others[0]] = 0
-                values[others[1]] = 0
+                for o in others:
+                    values[o] = 0
             else:
-                # 按比例缩减
                 excess = total - 100
-                for k in others:
-                    reduction = excess * (values[k] / other_sum) if other_sum > 0 else 0
-                    values[k] = max(0, values[k] - reduction)
-            # 重新赋值
-            self.solar_pct.set(values['solar'])
-            self.wind_pct.set(values['wind'])
-            self.thermal_pct.set(values['thermal'])
+                for o in others:
+                    reduction = excess * (values[o] / other_sum)
+                    values[o] = max(0, values[o] - reduction)
+        for s in sources:
+            getattr(self, f"{s}_pct").set(values[s])
         # 更新显示和计算
         self.update_energy_mix()
     
@@ -1140,19 +1150,22 @@ The Live Graph tab shows how metrics change over time as you adjust the paramete
             self.update_price_display()
         self.calculate_and_update()
 
+    def compute_avg_cost(self, factors):
+        """Calculate average electricity cost based on mix and price mode"""
+        custom = sum(ENERGY_SOURCES[s]['cost'] * factors[s] for s in factors)
+        if self.use_realtime_price.get() and self.price_source.get() != "本地加权均值":
+            standard = sum(ENERGY_SOURCES[s]['cost'] * STANDARD_ENERGY_MIX[s] for s in STANDARD_ENERGY_MIX)
+            return self.realtime_price.get() + (custom - standard)
+        return custom
+
     def update_price_display(self):
         """更新电价显示"""
         try:
-            if self.use_realtime_price.get():
-                val = self.realtime_price.get()
-                src = self.price_source.get()
-            else:
-                factors = getattr(self, 'factors', {'solar':0,'wind':0,'thermal':1})
-                val = sum(ENERGY_SOURCES[s]['cost'] * factors[s] for s in factors)
-                src = "本地加权均值"
+            factors = getattr(self, 'factors', {'solar':0,'wind':0,'fossil':1,'rest':0})
+            val = self.compute_avg_cost(factors)
+            src = self.price_source.get() if (self.use_realtime_price.get() and self.price_source.get() != "本地加权均值") else "本地加权均值"
             self.price_display.set(f"当前电价: {val:.2f} €/kWh (来源: {src})")
         except Exception as e:
-            # 兜底显示手动输入值
             val = self.realtime_price.get()
             self.price_display.set(f"当前电价: {val:.2f} €/kWh (来源: 默认值)")
             print("更新电价显示时出错:", e)
@@ -1161,26 +1174,35 @@ The Live Graph tab shows how metrics change over time as you adjust the paramete
         """更新能源构成比例和显示"""
         s = self.solar_pct.get()
         w = self.wind_pct.get()
-        t = self.thermal_pct.get()
-        total = s + w + t
+        f = self.fossil_pct.get()
+        r = self.rest_pct.get()
+        total = s + w + f + r
         if total == 0:
-            self.factors = {'solar':0, 'wind':0, 'thermal':1.0}
+            self.factors = {'solar':0, 'wind':0, 'fossil':1.0, 'rest':0}
             total_display = 0
         else:
-            self.factors = {'solar': s/total, 'wind': w/total, 'thermal': t/total}
+            self.factors = {
+                'solar': s/total,
+                'wind': w/total,
+                'fossil': f/total,
+                'rest': r/total
+            }
             total_display = total
         self.solar_val_label.config(text=f"{s:.0f}%")
         self.wind_val_label.config(text=f"{w:.0f}%")
-        self.thermal_val_label.config(text=f"{t:.0f}%")
+        self.fossil_val_label.config(text=f"{f:.0f}%")
+        self.rest_val_label.config(text=f"{r:.0f}%")
         if abs(total_display-100) > 0.1:
             self.energy_sum_label.config(text=f"合计: {total_display:.0f}% (请调整为100%)", foreground=COLORS["negative"])
         else:
             self.energy_sum_label.config(text=f"合计: {total_display:.0f}%", foreground=COLORS["positive"])
-        
+
         # 更新动态显示的能源构成和电价
-        self.energy_mix_display.set(f"太阳能: {s:.0f}%, 风能: {w:.0f}%, 火力: {t:.0f}%")
+        self.energy_mix_display.set(
+            f"太阳能: {s:.0f}%, 风能: {w:.0f}%, 化石: {f:.0f}%, 其他: {r:.0f}%"
+        )
         self.update_price_display()
-        
+
         self.calculate_and_update()
     
     def calculate_metrics(self, cover_reuse_pct, impeller_reuse_pct, housing_reuse_pct, recycle_pct, energy_mix_type, factors):
@@ -1219,15 +1241,7 @@ The Live Graph tab shows how metrics change over time as you adjust the paramete
         # 计算 CO₂ 强度（kgCO2/kWh）
         avg_co2 = sum(ENERGY_SOURCES[src]['co2'] * factors[src] for src in factors) / 1000
 
-        # —— 这里开始，按模式取平均电价 —— #
-        if self.use_realtime_price.get():
-            # 实时模式：只用从 API 或手动输入框读取的值
-            avg_cost = self.realtime_price.get()   # 单位：€/kWh
-        else:
-            # 本地模式：按滑杆比例加权 ENERGY_SOURCES 中各源的静态成本
-            avg_cost = sum(ENERGY_SOURCES[src]['cost'] * factors[src]
-                           for src in factors)
-        # —— 这里结束 —— #
+        avg_cost = self.compute_avg_cost(factors)
 
         co2 = energy * avg_co2 * (1 - recycle_pct/100 * 0.5)
 
@@ -1282,8 +1296,8 @@ The Live Graph tab shows how metrics change over time as you adjust the paramete
             
             material_recycling = float(self.material_recycling_var.get())
             
-            # 强制 baseline 为 0% reuse/recycle + 100% thermal
-            baseline_factors = {'solar': 0.0, 'wind': 0.0, 'thermal': 1.0}
+            # 强制 baseline 为 0% reuse/recycle + 100% fossil
+            baseline_factors = {'solar': 0.0, 'wind': 0.0, 'fossil': 1.0, 'rest': 0.0}
             baseline_metrics = self.calculate_metrics(0, 0, 0, 0, None, baseline_factors)
             
             # Calculate current metrics
