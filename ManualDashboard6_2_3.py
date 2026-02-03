@@ -153,7 +153,7 @@ class CircularControl(tk.Canvas):
         # Calculate dimensions
         self.radius = radius
         self.width = radius * 2 + 20
-        self.height = radius * 2 + 40  # Extra space for label
+        self.height = radius * 2 + 34  # Extra space for label
         
         # Get parent background color if not specified
         if 'bg' not in kwargs:
@@ -227,8 +227,13 @@ class CircularControl(tk.Canvas):
         
         # Draw label
         self.create_text(
-            cx, self.height - 15, text=self.label,
-            fill=self.text_color, font=("Segoe UI", 8),
+            cx,
+            self.height - 12,
+            text=self.label,
+            fill=self.text_color,
+            font=("Segoe UI", 8),
+            anchor="s",
+            justify="center",
             tags="label"
         )
     
@@ -896,71 +901,43 @@ class CircularEconomyDashboard:
         # Configure panel for dark background
         self.input_panel.configure(style="TLabelframe")
         
-        # Meter reuse control
+        # —— 合并后的分组标题 + 副标题（仍在 Input Parameters 面板内） ——
         ttk.Label(
             self.input_panel,
-            text="Reuse",
-            style="Section.TLabel"
-        ).pack(pady=(10, 5))
+            text="Zirkularitätsquoten (%)",
+            style="Section.TLabel",
+        ).pack(anchor="w", padx=10, pady=(10, 2))
+        ttk.Label(
+            self.input_panel,
+            text="Anteile für Reuse, Remanufacturing, Recycling",
+            style="Panel.TLabel",
+        ).pack(anchor="w", padx=10, pady=(0, 6))
 
-        meter_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
-        meter_frame.pack(fill="x", pady=5, padx=10)
+        # —— 控件网格：2 行 × 3 列（最后一格留空） ——
+        controls_grid = ttk.Frame(self.input_panel, style="Panel.TFrame")
+        controls_grid.pack(fill="x", padx=10, pady=(0, 8))
 
-        CircularControl(
-            meter_frame,
-            self.meter_reuse_pct,
-            label="Meter",
-            radius=GAUGE_RADIUS,
-            callback=self.calculate_and_update,
-        ).pack(side="left", padx=10)
+        cells = [
+            ("Wasserzähler\nReuse", self.meter_reuse_pct),
+            ("Impeller\nRemanufacturing", self.reman_impeller_pct),
+            ("Housing\nRemanufacturing", self.reman_housing_pct),
+            ("Impeller\nRecycling", self.recycle_impeller_pct),
+            ("Housing\nRecycling", self.recycle_housing_pct),
+        ]
 
-        # Remanufacturing controls
-        ttk.Label(self.input_panel, text="Remanufacturing",
-                 style="Section.TLabel").pack(pady=(15, 5))
+        for idx, (lbl, var) in enumerate(cells):
+            r, c = divmod(idx, 3)
+            w = CircularControl(
+                controls_grid,
+                var,
+                label=lbl,
+                radius=GAUGE_RADIUS,
+                callback=self.calculate_and_update,
+            )
+            w.grid(row=r, column=c, padx=6, pady=4, sticky="w")
 
-        reman_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
-        reman_frame.pack(fill="x", pady=5, padx=10)
-
-        CircularControl(
-            reman_frame,
-            self.reman_impeller_pct,
-            label="Impeller",
-            radius=GAUGE_RADIUS,
-            callback=self.calculate_and_update
-        ).pack(side="left", padx=10)
-
-        CircularControl(
-            reman_frame,
-            self.reman_housing_pct,
-            label="Housing",
-            radius=GAUGE_RADIUS,
-            callback=self.calculate_and_update
-        ).pack(side="left", padx=10)
-
-        # Recycling controls
-        ttk.Label(self.input_panel, text="Recycling",
-                 style="Section.TLabel").pack(pady=(15, 5))
-
-        recycle_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
-        recycle_frame.pack(fill="x", pady=5, padx=10)
-
-        recycle_impeller_control = CircularControl(
-            recycle_frame,
-            self.recycle_impeller_pct,
-            label="Impeller",
-            radius=GAUGE_RADIUS,
-            callback=self.calculate_and_update
-        )
-        recycle_impeller_control.pack(side="left", padx=10)
-
-        recycle_housing_control = CircularControl(
-            recycle_frame,
-            self.recycle_housing_pct,
-            label="Housing",
-            radius=GAUGE_RADIUS,
-            callback=self.calculate_and_update
-        )
-        recycle_housing_control.pack(side="left", padx=10)
+        for col in (0, 1, 2):
+            controls_grid.grid_columnconfigure(col, weight=1)
         
         # Energy mix inputs
         ttk.Label(self.input_panel, text="能源构成", style="Section.TLabel").pack(
