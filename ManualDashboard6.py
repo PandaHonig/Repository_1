@@ -46,15 +46,40 @@ STANDARD_ENERGY_MIX = {
 
 # Component costs
 COMPONENT_COSTS = {
-    "impeller": {"new": 0.20, "reused": 0.10},
-    "housing": {"new": 4.00, "reused": 2.00}
+    "impeller": {"new": 0.20, "reman": 0.15, "reused": 0.10},
+    "housing": {"new": 4.00, "reman": 3.00, "reused": 2.00}
 }
 
 # Energy consumption
 ENERGY_CONSUMPTION = {
     "new": 20.0,    # kWh for completely new
+    "reman": 16.5,  # kWh for remanufactured components
     "reused": 14.0  # kWh for completely reused
 }
+
+
+def compute_avg_co2_from_energy_mix(factors):
+    """Return the average CO₂ intensity (kg/kWh) for a given energy mix."""
+
+    return sum(ENERGY_SOURCES[src]["co2"] * factors[src] for src in factors) / 1000.0
+
+
+def compute_avg_price_from_energy_mix(
+    factors,
+    use_realtime=False,
+    realtime_price=0.0,
+    price_source="本地加权均值",
+):
+    """Return the average electricity price (€/kWh) for a given energy mix."""
+
+    custom = sum(ENERGY_SOURCES[src]["cost"] * factors[src] for src in factors)
+    if use_realtime and price_source != "本地加权均值":
+        standard = sum(
+            ENERGY_SOURCES[src]["cost"] * STANDARD_ENERGY_MIX[src]
+            for src in STANDARD_ENERGY_MIX
+        )
+        return realtime_price + (custom - standard)
+    return custom
 
 # Color scheme for futuristic design
 COLORS = {
@@ -708,11 +733,12 @@ class CircularEconomyDashboard:
         self.create_livegraph_panel()
         
         # Create input variables
-        self.impeller_var = tk.DoubleVar(value=0)
-        self.housing_var = tk.DoubleVar(value=0)
+        self.meter_reuse_pct = tk.DoubleVar(value=0.0)
+        self.reman_impeller_pct = tk.DoubleVar(value=0.0)
+        self.reman_housing_pct = tk.DoubleVar(value=0.0)
         # Individual recycling rates for each component
-        self.recycle_impeller_var = tk.DoubleVar(value=0)
-        self.recycle_housing_var = tk.DoubleVar(value=0)
+        self.recycle_impeller_pct = tk.DoubleVar(value=0.0)
+        self.recycle_housing_pct = tk.DoubleVar(value=0.0)
         
         self.solar_pct = tk.DoubleVar(value=int(STANDARD_ENERGY_MIX["solar"] * 100))
         self.wind_pct = tk.DoubleVar(value=int(STANDARD_ENERGY_MIX["wind"] * 100))
@@ -866,30 +892,46 @@ class CircularEconomyDashboard:
         # Configure panel for dark background
         self.input_panel.configure(style="TLabelframe")
         
-        # Reuse controls
-        ttk.Label(self.input_panel, text="Component Reusability",
-                 style="Section.TLabel").pack(pady=(10, 5))
+        # Meter reuse control
+        ttk.Label(
+            self.input_panel,
+            text="整表复用率（QM 判定）",
+            style="Section.TLabel"
+        ).pack(pady=(10, 5))
 
-        reuse_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
-        reuse_frame.pack(fill="x", pady=5, padx=10)
+        meter_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
+        meter_frame.pack(fill="x", pady=5, padx=10)
 
-        impeller_control = CircularControl(
-            reuse_frame,
-            self.impeller_var,
+        CircularControl(
+            meter_frame,
+            self.meter_reuse_pct,
+            label="Meter",
+            radius=GAUGE_RADIUS,
+            callback=self.calculate_and_update,
+        ).pack(side="left", padx=10)
+
+        # Remanufacturing controls
+        ttk.Label(self.input_panel, text="组件再制造",
+                 style="Section.TLabel").pack(pady=(15, 5))
+
+        reman_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
+        reman_frame.pack(fill="x", pady=5, padx=10)
+
+        CircularControl(
+            reman_frame,
+            self.reman_impeller_pct,
             label="Impeller",
             radius=GAUGE_RADIUS,
             callback=self.calculate_and_update
-        )
-        impeller_control.pack(side="left", padx=10)
+        ).pack(side="left", padx=10)
 
-        housing_control = CircularControl(
-            reuse_frame,
-            self.housing_var,
+        CircularControl(
+            reman_frame,
+            self.reman_housing_pct,
             label="Housing",
             radius=GAUGE_RADIUS,
             callback=self.calculate_and_update
-        )
-        housing_control.pack(side="left", padx=10)
+        ).pack(side="left", padx=10)
 
         # Recycling controls
         ttk.Label(self.input_panel, text="Component Recycling",
@@ -900,7 +942,7 @@ class CircularEconomyDashboard:
 
         recycle_impeller_control = CircularControl(
             recycle_frame,
-            self.recycle_impeller_var,
+            self.recycle_impeller_pct,
             label="Impeller",
             radius=GAUGE_RADIUS,
             callback=self.calculate_and_update
@@ -909,7 +951,7 @@ class CircularEconomyDashboard:
 
         recycle_housing_control = CircularControl(
             recycle_frame,
-            self.recycle_housing_var,
+            self.recycle_housing_pct,
             label="Housing",
             radius=GAUGE_RADIUS,
             callback=self.calculate_and_update
@@ -1026,50 +1068,42 @@ class CircularEconomyDashboard:
         
         # Energy calculation
         calc_text.insert("end", "1. ENERGY CONSUMPTION\n", "subheading")
-        calc_text.insert("end", "Base formula: energy = base_energy - (weighted_avg_reuse / 100) * (base_energy - reused_energy)\n\n")
+        calc_text.insert("end", "Formula: energy = Q_whole*E_reused + (1-R_meter)*(w_h*(R_rem_h*E_reman + (1-R_rem_h)*E_new) + w_i*(R_rem_i*E_reman + (1-R_rem_i)*E_new))\n\n")
         calc_text.insert("end", "Where:\n")
-        calc_text.insert("end", "- base_energy = 20.0 kWh (for completely new component)\n")
-        calc_text.insert("end", "- reused_energy = 14.0 kWh (for completely reused component)\n")
-        calc_text.insert("end", "- weighted_avg_reuse = weighted average of component reuse percentages\n\n")
-        
-        calc_text.insert("end", "Weighted average calculation:\n")
-        calc_text.insert("end", "1. Total new cost = sum of all component new costs\n")
-        calc_text.insert("end", "2. For each component:\n")
-        calc_text.insert("end", "   weighted_component_reuse = (component_reuse_pct / 100) * (component_new_cost / total_new_cost)\n")
-        calc_text.insert("end", "3. weighted_avg_reuse = sum of all weighted_component_reuse * 100\n\n")
-        
+        calc_text.insert("end", "- Q_whole = meter_reuse_pct / 100\n")
+        calc_text.insert("end", "- R_rem_h / R_rem_i = remanufacturing shares of housing / impeller\n")
+        calc_text.insert("end", "- w_h / w_i = cost weights based on new component prices\n")
+        calc_text.insert("end", "- E_new = 20.0 kWh, E_reman = 16.5 kWh, E_reused = 14.0 kWh\n\n")
+
         # CO2 calculation
         calc_text.insert("end", "2. CO2 EMISSIONS\n", "subheading")
-        calc_text.insert("end", "Formula: co2 = energy * co2_factor * (1 - 0.5 * effective_recycle_pct / 100)\n\n")
+        calc_text.insert("end", "Formula: co2 = energy * avg_co2_mix * (1 - 0.5 * secondary_share)\n\n")
         calc_text.insert("end", "Where:\n")
-        calc_text.insert("end", "- energy = calculated energy consumption\n")
-        calc_text.insert("end", "- co2_factor = ENERGY_SOURCES[energy_mix_type] / 1000 (converts g/kWh to kg/kWh)\n")
-        calc_text.insert("end", "- effective_recycle_pct = material-weighted recycling percentage\n\n")
-        calc_text.insert("end", "Note: 100% effective recycling reduces CO2 emissions by 50%\n\n")
-        
-        calc_text.insert("end", "Energy mix CO2 factors (g CO2/kWh):\n")
-        calc_text.insert("end", "- USA: 450\n")
-        calc_text.insert("end", "- EU: 300\n")
-        calc_text.insert("end", "- DT: 250\n")
-        calc_text.insert("end", "- DTeco: 50\n\n")
+        calc_text.insert("end", "- avg_co2_mix = weighted CO₂ factor from the selected energy mix (kg/kWh)\n")
+        calc_text.insert("end", "- secondary_share = secondary_material / total_material\n")
+        calc_text.insert("end", "- Secondary materials cut emissions by up to 50%\n\n")
 
         # Energy cost calculation
         calc_text.insert("end", "3. ENERGY COST\n", "subheading")
-        calc_text.insert("end", "Formula: energy_cost = energy * (ENERGY_COSTS[energy_mix_type] / 100)\n\n")
-        calc_text.insert("end", "Where:\n")
-        calc_text.insert("end", "- energy = calculated energy consumption\n")
-        calc_text.insert("end", "- ENERGY_COSTS[energy_mix_type] / 100 converts cents to euros\n\n")
+        calc_text.insert("end", "Formula: energy_cost = energy * avg_price_mix\n")
+        calc_text.insert("end", "- avg_price_mix follows the active energy mix and realtime adjustments\n\n")
 
         # Component cost calculation
         calc_text.insert("end", "4. COMPONENT COST\n", "subheading")
-        calc_text.insert("end", "For each component: cost = new_cost*(1 - reuse_pct/100) + reused_cost*(reuse_pct/100)\n")
-        calc_text.insert("end", "Then cost *= (1 + 0.3 * component_recycle_pct/100)\n")
-        calc_text.insert("end", "Total component cost = sum of all component costs\n\n")
+        calc_text.insert("end", "Housing cost = Q_whole*C_reused + (1-R_meter)*(R_rem_h*C_reman + (1-R_rem_h)*C_new)\n")
+        calc_text.insert("end", "Impeller cost = Q_whole*C_reused + (1-R_meter)*(R_rem_i*C_reman + (1-R_rem_i)*C_new)\n")
+        calc_text.insert("end", "Component cost = housing cost + impeller cost\n\n")
 
         # Material calculation
         calc_text.insert("end", "5. MATERIALS\n", "subheading")
-        calc_text.insert("end", "Brass: 80% reuse reduction via housing + 20% recycling retention\n")
-        calc_text.insert("end", "Plastic: 80% reuse reduction via impeller + 20% recycling retention\n\n")
+        calc_text.insert(
+            "end",
+            "Brass: REF_BRASS * Q_new_housing split into virgin / secondary by share_sec_housing\n",
+        )
+        calc_text.insert(
+            "end",
+            "Plastic: REF_PLASTIC * Q_new_impeller split into virgin / secondary by share_sec_impeller\n\n",
+        )
         
         # Configure tags for styling
         calc_text.tag_configure("heading", font=("Segoe UI", 12, "bold"), foreground=COLORS["accent"])
@@ -1086,16 +1120,14 @@ class CircularEconomyDashboard:
         info_text = """
 Circular Economy Dashboard
 
-This dashboard simulates the impact of reusing and recycling components:
+This dashboard simulates the impact of meter reuse, component remanufacturing, and recycling:
 
 Input Parameters:
-- Component Reusability: Percentage of each component that is reused
-    - Impeller: €0.20 new, €0.10 reused
-    - Housing: €4.00 new, €2.00 reused
-- Component Recycling (Impeller/Housing): Percentage of each component's materials that are recycled
-    - Each component's cost increases by up to 30% when fully recycled
-    - Reuse affects up to 80% of material needs; recycling reduces the remaining 20%
-    - Effective recycling, weighted by brass and plastic masses, can cut CO₂ up to 50%
+- Meter Reuse (QM): Percentage of complete meters that remain in service without disassembly.
+- Component Remanufacturing (Impeller/Housing): Share of dismantled components that are remanufactured.
+    - Impeller: €0.20 new, €0.15 reman, €0.10 reused
+    - Housing: €4.00 new, €3.00 reman, €2.00 reused
+- Component Recycling (Impeller/Housing): Percentage of remaining material demand sourced from secondary feedstock.
 - Energy Mix: Simulated by activating solar and/or wind power
     - Neither active = USA mix (28.01¢/kWh)
     - Solar active = EU mix (36.01¢/kWh)
@@ -1103,17 +1135,18 @@ Input Parameters:
     - Both active = German eco mix (44.12¢/kWh)
 
 Energy Consumption:
-- A completely new part requires 20 kWh
-- A completely reused part requires 14 kWh
+- Completely new components require 20 kWh
+- Remanufactured components require 16.5 kWh on average
+- Fully reused units require 14 kWh
 
 Material Consumption:
-- Reuse can reduce material usage by max 80%
-- Recycling can reduce material usage by max 20%
-- Both combined can reduce material usage to zero
+- Remanufacturing lowers demand in proportion to each component's reman share
+- Recycling supplies secondary feedstock for the remaining new-build fraction
+- Secondary feedstock can reduce lifecycle CO₂ emissions by up to 50%
 
 The dashboard compares the baseline scenario (0% reuse, 0% recycle, USA energy) with your current settings.
 
-The Live Metrics Visualization panel lets you save up to three records and compare their energy, cost, CO₂, brass, and plastic values.
+The Scenario Comparison panel lets you save up to three records and compare their energy, cost, CO₂, brass, and plastic values.
 """
         
         # Create a text widget for the info content
@@ -1180,14 +1213,12 @@ The Live Metrics Visualization panel lets you save up to three records and compa
 
     def compute_avg_cost(self, factors):
         """Calculate average electricity cost based on mix and price mode"""
-        # Weighted cost of the user's selected energy mix
-        # (当前能源组合的加权成本)
-        custom = sum(ENERGY_SOURCES[s]['cost'] * factors[s] for s in factors)
-        # If using realtime price, adjust based on the standard mix
-        if self.use_realtime_price.get() and self.price_source.get() != "本地加权均值":
-            standard = sum(ENERGY_SOURCES[s]['cost'] * STANDARD_ENERGY_MIX[s] for s in STANDARD_ENERGY_MIX)
-            return self.realtime_price.get() + (custom - standard)
-        return custom
+        return compute_avg_price_from_energy_mix(
+            factors,
+            use_realtime=self.use_realtime_price.get(),
+            realtime_price=self.realtime_price.get(),
+            price_source=self.price_source.get(),
+        )
 
     def update_price_display(self):
         """更新电价显示"""
@@ -1236,79 +1267,147 @@ The Live Metrics Visualization panel lets you save up to three records and compa
 
         self.calculate_and_update()
     
-    def calculate_metrics(self, impeller_reuse_pct, housing_reuse_pct,
-                          recycle_impeller_pct, recycle_housing_pct,
-                          energy_mix_type, factors):
+    def calculate_metrics(
+        self,
+        meter_reuse_pct,
+        reman_housing_pct,
+        reman_impeller_pct,
+        recycle_housing_pct,
+        recycle_impeller_pct,
+        factors,
+    ):
         """计算所有指标"""
-        base_energy = ENERGY_CONSUMPTION["new"]
-        reused_energy = ENERGY_CONSUMPTION["reused"]
+
+        meter_reuse_pct = float(meter_reuse_pct)
+        reman_housing_pct = float(reman_housing_pct)
+        reman_impeller_pct = float(reman_impeller_pct)
+        recycle_housing_pct = float(recycle_housing_pct)
+        recycle_impeller_pct = float(recycle_impeller_pct)
+
+        R_meter = meter_reuse_pct / 100.0
+        R_rem_h = reman_housing_pct / 100.0
+        R_rem_i = reman_impeller_pct / 100.0
+        R_rec_h = recycle_housing_pct / 100.0
+        R_rec_i = recycle_impeller_pct / 100.0
+
+        Q_whole = R_meter
+        Q_rem_housing = (1 - R_meter) * R_rem_h
+        Q_rem_impeller = (1 - R_meter) * R_rem_i
+
+        Q_new_housing = max(0.0, 1 - Q_whole - Q_rem_housing)
+        Q_new_impeller = max(0.0, 1 - Q_whole - Q_rem_impeller)
+
+        Q_sec_brass = (1 - R_meter) * (1 - R_rem_h) * R_rec_h
+        Q_sec_plastic = (1 - R_meter) * (1 - R_rem_i) * R_rec_i
+
+        share_sec_housing = (
+            0.0
+            if Q_new_housing <= 1e-9
+            else min(1.0, Q_sec_brass / Q_new_housing)
+        )
+        share_sec_impeller = (
+            0.0
+            if Q_new_impeller <= 1e-9
+            else min(1.0, Q_sec_plastic / Q_new_impeller)
+        )
+
+        virgin_brass = REF_BRASS * Q_new_housing * (1 - share_sec_housing)
+        secondary_brass = REF_BRASS * Q_new_housing * share_sec_housing
+        virgin_plastic = REF_PLASTIC * Q_new_impeller * (1 - share_sec_impeller)
+        secondary_plastic = REF_PLASTIC * Q_new_impeller * share_sec_impeller
+
+        brass_kg = virgin_brass + secondary_brass
+        plastic_kg = virgin_plastic + secondary_plastic
 
         housing_new = COMPONENT_COSTS["housing"]["new"]
         impeller_new = COMPONENT_COSTS["impeller"]["new"]
-        total_new_cost = housing_new + impeller_new
+        w_h = housing_new / (housing_new + impeller_new)
+        w_i = 1.0 - w_h
 
-        weighted_reuse_pct = 100.0 * (
-            (housing_reuse_pct / 100.0) * (housing_new / total_new_cost) +
-            (impeller_reuse_pct / 100.0) * (impeller_new / total_new_cost)
+        energy_kwh = (
+            Q_whole * ENERGY_CONSUMPTION["reused"]
+            + (1 - R_meter)
+            * (
+                w_h
+                * (
+                    R_rem_h * ENERGY_CONSUMPTION["reman"]
+                    + (1 - R_rem_h) * ENERGY_CONSUMPTION["new"]
+                )
+                + w_i
+                * (
+                    R_rem_i * ENERGY_CONSUMPTION["reman"]
+                    + (1 - R_rem_i) * ENERGY_CONSUMPTION["new"]
+                )
+            )
         )
 
-        energy = base_energy - (weighted_reuse_pct / 100.0) * (base_energy - reused_energy)
+        C_h_new = COMPONENT_COSTS["housing"]["new"]
+        C_h_reman = COMPONENT_COSTS["housing"]["reman"]
+        C_h_reused = COMPONENT_COSTS["housing"]["reused"]
+        C_i_new = COMPONENT_COSTS["impeller"]["new"]
+        C_i_reman = COMPONENT_COSTS["impeller"]["reman"]
+        C_i_reused = COMPONENT_COSTS["impeller"]["reused"]
 
-        cost_housing = (
-            (1 - housing_reuse_pct / 100.0) * COMPONENT_COSTS["housing"]["new"] +
-            (housing_reuse_pct / 100.0) * COMPONENT_COSTS["housing"]["reused"]
+        cost_housing = Q_whole * C_h_reused + (1 - R_meter) * (
+            R_rem_h * C_h_reman + (1 - R_rem_h) * C_h_new
         )
-        cost_impeller = (
-            (1 - impeller_reuse_pct / 100.0) * COMPONENT_COSTS["impeller"]["new"] +
-            (impeller_reuse_pct / 100.0) * COMPONENT_COSTS["impeller"]["reused"]
+        cost_impeller = Q_whole * C_i_reused + (1 - R_meter) * (
+            R_rem_i * C_i_reman + (1 - R_rem_i) * C_i_new
         )
-
-        cost_housing *= (1 + 0.3 * recycle_housing_pct / 100.0)
-        cost_impeller *= (1 + 0.3 * recycle_impeller_pct / 100.0)
 
         component_cost_eur = cost_housing + cost_impeller
 
-        avg_co2_kg_per_kwh = sum(ENERGY_SOURCES[src]['co2'] * factors[src] for src in factors) / 1000.0
-        avg_price_eur_per_kwh = self.compute_avg_cost(factors)
+        avg_co2_kg_per_kwh = compute_avg_co2_from_energy_mix(factors)
+        avg_price_eur_per_kwh = compute_avg_price_from_energy_mix(
+            factors,
+            use_realtime=self.use_realtime_price.get(),
+            realtime_price=self.realtime_price.get(),
+            price_source=self.price_source.get(),
+        )
 
-        brass_kg = REF_BRASS * (1 - housing_reuse_pct / 100.0) * 0.8 \
-            + REF_BRASS * 0.2 * (1 - recycle_housing_pct / 100.0)
-        plastic_kg = REF_PLASTIC * (1 - impeller_reuse_pct / 100.0) * 0.8 \
-            + REF_PLASTIC * 0.2 * (1 - recycle_impeller_pct / 100.0)
+        total_material = brass_kg + plastic_kg
+        secondary_share = (
+            0.0
+            if total_material <= 1e-9
+            else (secondary_brass + secondary_plastic) / total_material
+        )
 
-        effective_recycle_pct = (
-            REF_BRASS * recycle_housing_pct + REF_PLASTIC * recycle_impeller_pct
-        ) / (REF_BRASS + REF_PLASTIC)
-
-        co2_kg = energy * avg_co2_kg_per_kwh * (1 - 0.5 * effective_recycle_pct / 100.0)
-        energy_cost_eur = energy * avg_price_eur_per_kwh
+        co2_kg = energy_kwh * avg_co2_kg_per_kwh * (1 - 0.5 * secondary_share)
+        energy_cost_eur = energy_kwh * avg_price_eur_per_kwh
         total_cost_for_plot = component_cost_eur + energy_cost_eur
 
         return {
-            "energy": energy,
+            "energy": energy_kwh,
             "energy_cost": energy_cost_eur,
             "co2": co2_kg,
             "brass": brass_kg,
             "plastic": plastic_kg,
             "component_cost": component_cost_eur,
-            "total_cost": total_cost_for_plot
+            "total_cost": total_cost_for_plot,
         }
     
     def calculate_and_update(self):
         try:
-            # Get the component reuse percentages
-            impeller_reuse = float(self.impeller_var.get())
-            housing_reuse = float(self.housing_var.get())
+            meter_reuse = float(self.meter_reuse_pct.get())
+            reman_impeller = float(self.reman_impeller_pct.get())
+            reman_housing = float(self.reman_housing_pct.get())
 
-            recycle_impeller = float(self.recycle_impeller_var.get())
-            recycle_housing = float(self.recycle_housing_var.get())
+            recycle_impeller = float(self.recycle_impeller_pct.get())
+            recycle_housing = float(self.recycle_housing_pct.get())
 
             # 强制 baseline 为 0% reuse/recycle + 100% fossil
             baseline_factors = {'solar': 0.0, 'wind': 0.0, 'fossil': 1.0, 'rest': 0.0}
-            baseline_metrics = self.calculate_metrics(0, 0, 0, 0, None, baseline_factors)
+            baseline_metrics = self.calculate_metrics(0, 0, 0, 0, 0, baseline_factors)
 
             # Calculate current metrics
-            current_metrics = self.calculate_metrics(impeller_reuse, housing_reuse, recycle_impeller, recycle_housing, None, self.factors)
+            current_metrics = self.calculate_metrics(
+                meter_reuse,
+                reman_housing,
+                reman_impeller,
+                recycle_housing,
+                recycle_impeller,
+                self.factors,
+            )
             
             # Update the result variables
             self.energy_baseline.set(baseline_metrics['energy'])
@@ -1363,24 +1462,26 @@ The Live Metrics Visualization panel lets you save up to three records and compa
             print(f"Error in calculation: {e}")
     def save_record(self):
         """Save the current metrics as a record"""
-        impeller_reuse = int(self.impeller_var.get())
-        housing_reuse = int(self.housing_var.get())
-        recycle_impeller = int(self.recycle_impeller_var.get())
-        recycle_housing = int(self.recycle_housing_var.get())
+        meter_reuse = int(self.meter_reuse_pct.get())
+        reman_impeller = int(self.reman_impeller_pct.get())
+        reman_housing = int(self.reman_housing_pct.get())
+        recycle_impeller = int(self.recycle_impeller_pct.get())
+        recycle_housing = int(self.recycle_housing_pct.get())
 
         current_metrics = self.calculate_metrics(
-            impeller_reuse,
-            housing_reuse,
-            recycle_impeller,
+            meter_reuse,
+            reman_housing,
+            reman_impeller,
             recycle_housing,
-            None,
+            recycle_impeller,
             self.factors,
         )
 
         record = {
             "label": f"Record {len(self.records_chart.records) + 1}",
-            "reuse_impeller": impeller_reuse,
-            "reuse_housing": housing_reuse,
+            "meter_reuse": meter_reuse,
+            "reman_impeller": reman_impeller,
+            "reman_housing": reman_housing,
             "recycle_impeller": recycle_impeller,
             "recycle_housing": recycle_housing,
             "energy": current_metrics['energy'],
