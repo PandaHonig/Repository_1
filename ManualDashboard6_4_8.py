@@ -1,11 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-Created on Sat Mar 15 11:19:52 2025
-Updated on Fri Aug 08 01:19:52 2025
-Baseline: 0 % reuse, 0 % recycle, 100 % fossil (worst-case scenario)
-@author: tobias
-@author: Junhao
-"""
 
 import tkinter as tk
 from tkinter import ttk
@@ -17,7 +10,7 @@ from zoneinfo import ZoneInfo
 import re
 import threading, time
 try:
-    import serial  # 需要: pip install pyserial
+    import serial  # requires: pip install pyserial
 except ImportError:
     serial = None
 
@@ -27,8 +20,6 @@ mass_plastic_per_impeller_kg = 0.2  # kg per impeller unit
 
 
 def clamp01(x: float) -> float:
-    """Clamp a numeric value to the inclusive range [0, 1]."""
-
     if x < 0.0:
         return 0.0
     if x > 1.0:
@@ -37,17 +28,13 @@ def clamp01(x: float) -> float:
 
 
 def to_rate(percent_value: float) -> float:
-    """Convert a 0–100 percentage to a normalized rate in [0, 1]."""
-
     return clamp01(round(float(percent_value), 4) / 100.0)
 
 
 def safe_divide(numerator: float, denominator: float) -> float:
-    """Divide with zero protection for very small denominators."""
-
     return 0.0 if abs(denominator) < 1e-12 else numerator / denominator
 
-# API 密钥 (需要替换为实际的密钥)
+# API key (replace with real key)
 YOUR_API_KEY = "46b6d9c5-1c8a-4dc0-bb0b-eaf380ec0f6a"
 
 # Energy mix CO2 factors (g CO2/kWh)
@@ -81,8 +68,6 @@ ENERGY_CONSUMPTION = {
 
 
 def compute_avg_co2_from_energy_mix(factors):
-    """Return the average CO₂ intensity (kg/kWh) for a given energy mix."""
-
     return sum(ENERGY_SOURCES[src]["co2"] * factors[src] for src in factors) / 1000.0
 
 
@@ -90,12 +75,10 @@ def compute_avg_price_from_energy_mix(
     factors,
     use_realtime=False,
     realtime_price=0.0,
-    price_source="本地加权均值",
+    price_source="Lokaler gewichteter Mittelwert",
 ):
-    """Return the average electricity price (€/kWh) for a given energy mix."""
-
     custom = sum(ENERGY_SOURCES[src]["cost"] * factors[src] for src in factors)
-    if use_realtime and price_source != "本地加权均值":
+    if use_realtime and price_source != "Lokaler gewichteter Mittelwert":
         standard = sum(
             ENERGY_SOURCES[src]["cost"] * STANDARD_ENERGY_MIX[src]
             for src in STANDARD_ENERGY_MIX
@@ -135,16 +118,16 @@ CHART_W_RIGHT     = 900 if not COMPACT else 480
 CHART_W_SCENARIO  = 900 if not COMPACT else 620
 GAUGE_RADIUS      = 52 if not COMPACT else 38
 
-PAD_X               = 8 if COMPACT else 12    # 通用水平内边距
-PAD_Y_SMALL         = 2                        # 行内/图例间距
-PAD_Y_PANEL         = 5                        # 面板之间的垂直间距
+PAD_X               = 8 if COMPACT else 12    # Common horizontal padding
+PAD_Y_SMALL         = 2                        # Inline spacing
+PAD_Y_PANEL         = 5                        # Panel spacing
 
 TITLE_FONT_SIZE     = 11 if COMPACT else 14
 SUBTITLE_FONT_SIZE  = 9 if COMPACT else 11
 SECTION_FONT_SIZE   = 8 if COMPACT else 10
 VALUE_FONT_SIZE     = 8
 
-# 压缩图表边距与图例密度
+# Compact chart margins and legend density
 MARGIN_LEFT         = 38 if COMPACT else 50
 MARGIN_RIGHT        = 12 if COMPACT else 20
 MARGIN_TOP          = 10 if COMPACT else 20
@@ -153,27 +136,11 @@ LEGEND_SPACING      = 12 if COMPACT else 22
 LEGEND_BOX          = 7
 
 SHOW_CALC_TABS = False
-POTI_ONLY = False  # True = only poti，False = poti + dashboard
+POTI_ONLY = False  # True = only poti, False = poti + dashboard
 
 class CircularControl(tk.Canvas):
-    """A futuristic circular control for setting percentage values"""
     
     def __init__(self, parent, variable, label="", radius=50, callback=None, **kwargs):
-        """Initialize the circular control
-        
-        Parameters:
-        -----------
-        parent : tkinter widget
-            The parent widget
-        variable : tkinter.DoubleVar
-            The variable to control
-        label : str
-            The label for the control
-        radius : int
-            The radius of the circular control
-        callback : function
-            Function to call when value changes
-        """
         # Calculate dimensions
         self.radius = radius
         self.width = radius * 2 + 20
@@ -210,7 +177,6 @@ class CircularControl(tk.Canvas):
         self.bind("<ButtonRelease-1>", self._on_release)
     
     def _draw_control(self):
-        """Draw the circular control"""
         self.delete("all")
         
         # Calculate center point
@@ -262,19 +228,15 @@ class CircularControl(tk.Canvas):
         )
     
     def _on_press(self, event):
-        """Handle mouse press event"""
         self._update_value(event)
     
     def _on_drag(self, event):
-        """Handle mouse drag event"""
         self._update_value(event)
     
     def _on_release(self, event):
-        """Handle mouse release event"""
         self._update_value(event)
     
     def _update_value(self, event):
-        """Update value based on mouse position"""
         # Calculate center point
         cx = self.width // 2
         cy = (self.height - 15) // 2
@@ -308,40 +270,27 @@ class CircularControl(tk.Canvas):
             self.callback()
 
     def set_external_value(self, value):
-        """
-        设置一个外部给定的百分比数值（例如来自串口 / Poti），而不是鼠标事件。
-
-        value: 0–100 的数值，可以是 float，将被限制在 0–100 范围，保留一位小数。
-        """
         try:
             v = float(value)
         except Exception:
             return
 
-        # 限制在 0–100
         v = max(0.0, min(100.0, v))
 
         old_value = self.variable.get()
         if abs(old_value - v) < 0.9:
-            # 变化太小就不必重画和触发回调，避免 UI 抖动
             return
 
-        # 写入 Tkinter 变量
         self.variable.set(round(v, 1))
 
-        # 重画控件
         self._draw_control()
 
-        # 保持行为与鼠标更新一致：触发 callback
         if self.callback:
             self.callback()
 
 class FuturisticStyle:
-    """Apply futuristic styling to Tkinter widgets"""
-    
     @staticmethod
     def configure_styles():
-        """Configure ttk styles for a futuristic look"""
         style = ttk.Style()
         #style.theme_use("clam")
         
@@ -402,11 +351,10 @@ class FuturisticStyle:
             sliderthickness=16,
             sliderlength=24
         )
-        #“Save / Clear”的深色按钮
         style.configure(
            "CyberDark.TButton",
-           background=COLORS["bg_light"],     # 深灰蓝
-           foreground=COLORS["text"],         # 亮字
+           background=COLORS["bg_light"],
+           foreground=COLORS["text"],
            font=("Segoe UI", 8, "bold"),
            borderwidth=0,
            relief="flat",
@@ -414,7 +362,7 @@ class FuturisticStyle:
         style.map(
            "CyberDark.TButton",
            background=[
-               ("active", COLORS["accent"]),   # 悬浮 / 按下：赛博青
+               ("active", COLORS["accent"]),
                ("pressed", COLORS["accent"]),
            ],
            foreground=[
@@ -431,12 +379,7 @@ class FuturisticStyle:
 
 
 class FuturisticTooltip:
-    """Futuristic style tooltip bubble for Tk/ttk widgets.
-
-    - 自动根据鼠标位置放置气泡
-    - 避免超出屏幕边界（左右/上下都会夹紧）
-    - 触控/拖动时自动取消显示
-    """
+    """Tooltip bubble for Tk/ttk widgets."""
 
     def __init__(self, widget, text, wraplength=260, delay_ms=250):
         self.widget = widget
@@ -456,7 +399,6 @@ class FuturisticTooltip:
         widget.bind("<ButtonRelease-1>", self._hide, add="+")
 
     def _clamp_to_screen(self, x, y, tw):
-        """根据屏幕和 tooltip 尺寸，把 (x,y) 夹紧在可见范围内"""
         tw.update_idletasks()
         screen_w = tw.winfo_screenwidth()
         screen_h = tw.winfo_screenheight()
@@ -465,18 +407,15 @@ class FuturisticTooltip:
 
         new_x, new_y = x, y
 
-        # 右边超出：优先尝试放在控件左侧
         if new_x + w > screen_w - 5:
             widget_left = self.widget.winfo_rootx()
             new_x = widget_left - w - 16
 
-        # 再做一次左右边界夹紧
         if new_x < 0:
             new_x = 0
         if new_x + w > screen_w - 5:
             new_x = screen_w - w - 5
 
-        # 下边超出：往上抬
         if new_y + h > screen_h - 5:
             new_y = screen_h - h - 5
 
@@ -537,7 +476,6 @@ class FuturisticTooltip:
         tw.wm_geometry(f"+{int(x)}+{int(y)}")
 
     def _move(self, event):
-        """跟随鼠标移动 tooltip，同样避免出屏幕"""
         if not self.tipwindow:
             return
 
@@ -575,10 +513,7 @@ class FuturisticTooltip:
         self._enter_event = None
         self._enter_coords = None
 class FuturisticChart(tk.Canvas):
-    """A futuristic styled chart"""
-    
     def __init__(self, parent, width=400, height=200, bg=COLORS["chart_bg"]):
-        """Initialize the chart"""
         super().__init__(parent, width=width, height=height, bg=bg, 
                         highlightthickness=0, bd=0)
         
@@ -593,7 +528,6 @@ class FuturisticChart(tk.Canvas):
         self.draw_grid()
     
     def draw_grid(self):
-        """Draw a subtle grid on the chart"""
         # Draw horizontal grid linesf
         for i in range(5):
             y = self.margin_top + (i * self.chart_height / 4)
@@ -626,16 +560,12 @@ class FuturisticChart(tk.Canvas):
         )
 
 class ComparisonChart(FuturisticChart):
-    """A futuristic bar chart for comparing baseline vs current values"""
-
     def __init__(self, parent, width=CHART_W_RIGHT, height=300):
-        """Initialize the chart"""
         super().__init__(parent, width, height)
         self.baseline_color = COLORS["negative"]
         self.current_color = COLORS["metric1"]
     
     def update_chart(self, categories, baseline_values, current_values, colors=None, units=None):
-        """Update the chart with new data"""
         # Clear existing chart elements (not grid or axes)
         self.delete("bar", "label", "value", "unit", "legend")
 
@@ -758,7 +688,6 @@ class ComparisonChart(FuturisticChart):
         self.draw_legend()
 
     def draw_legend(self):
-        """Draw the chart legend inside the top-right corner"""
         items = [
             ("Baseline", self.baseline_color),
             ("Current", self.current_color),
@@ -783,10 +712,7 @@ class ComparisonChart(FuturisticChart):
             )
 
 class RecordBarChart(FuturisticChart):
-    """A chart showing up to three saved records as grouped bars"""
-
     def __init__(self, parent, width=900, height=250, max_records=3):
-        """Initialize the chart"""
         super().__init__(parent, width, height)
 
         if self.margin_bottom < 32:
@@ -808,19 +734,16 @@ class RecordBarChart(FuturisticChart):
         self.update_chart()
 
     def add_record(self, record):
-        """Add a new record to the chart"""
         if len(self.records) >= self.max_records:
             self.records.pop(0)
         self.records.append(record)
         self.update_chart()
 
     def clear_records(self):
-        """Remove all saved records"""
         self.records.clear()
         self.update_chart()
 
     def update_chart(self):
-        """Redraw the bar chart with current records"""
         self.delete("bar", "label", "legend", "value")
 
         if not self.records:
@@ -878,7 +801,6 @@ class RecordBarChart(FuturisticChart):
         self.draw_legend()
 
     def draw_legend(self):
-        """Draw the chart legend at the top-right corner"""
         items = [
             ("Energy (kWh)", "energy"),
             ("CO2 (kg)", "co2"),
@@ -966,7 +888,7 @@ class CircularEconomyDashboard:
         self.rest_pct = tk.DoubleVar(value=int(STANDARD_ENERGY_MIX["rest"] * 100))
         self.use_realtime_price = tk.BooleanVar(value=False)
         self.realtime_price = tk.DoubleVar(value=0.15)
-        self.price_source = tk.StringVar(value="本地加权均值")
+        self.price_source = tk.StringVar(value="Lokaler gewichteter Mittelwert")
         
         # Create result variables
         default_energy = ENERGY_CONSUMPTION["new"]
@@ -1004,32 +926,27 @@ class CircularEconomyDashboard:
         self.fetch_realtime_price()
 
 
-        # ===== Solar/Wind 控制参数 =====
-        self._solar_target = float(self.solar_pct.get())   # 当前 Solar 目标值
-        self._ramp_interval_ms = 50                        # 步进周期
-        self._ramp_up_sec = 10.0                           # Solar 0→100 用时（秒）
-        self._ramp_dn_sec = 10.0                           # Solar 100→0 用时（秒）
+        self._solar_target = float(self.solar_pct.get())
+        self._ramp_interval_ms = 50
+        self._ramp_up_sec = 10.0
+        self._ramp_dn_sec = 10.0
 
-        # Solar 状态量
-        self._serial_port = None  # 保存 Arduino 串口对象，用于发送 Energiemix
-        self._solar_state = 'A'            # 当前 Arduino 状态 A/L/B
-        self._last_solar_state = 'A'       # 上一次状态（备用）
-        self._manual_lock = False          # 手动调节后锁定，直到 L/B 再次出现
-        self._auto_updating = False        # 内部自动推进时置 True，避免误判为“手动”
-        self._auto_ramping = False         # 是否处于自动推进中
+        self._serial_port = None
+        self._solar_state = 'A'
+        self._last_solar_state = 'A'
+        self._manual_lock = False
+        self._auto_updating = False
+        self._auto_ramping = False
 
-        # Wind 状态量
         self._wind_target = float(self.wind_pct.get())
         self._wind_state = 'STOPPED'
         self._wind_manual_lock = False
         self._wind_auto_ramping = False
         self._wind_auto_updating = False
-        self._wind_ramp_up_sec = 10.0       # Wind 0→100 用时（秒）
+        self._wind_ramp_up_sec = 10.0
 
-        # 启动串口读取（根据你的端口修改，如 Win: 'COM3' / Mac: '/dev/tty.usbserial-xxxx' / Linux: '/dev/ttyUSB0'）
         self._start_serial(port_hint='COM3', baud=9600)
 
-        # 开始定时匀速推进
         self.root.after(self._ramp_interval_ms, self._ramp_tick)
 
     def show_overview_help(self):
@@ -1068,7 +985,6 @@ class CircularEconomyDashboard:
         text.config(state="disabled")
 
     def create_input_panel(self):
-        """Create the input parameters panel"""
         input_panel = ttk.LabelFrame(self.input_column)
         input_panel.pack(fill="both", expand=True)
 
@@ -1087,7 +1003,6 @@ class CircularEconomyDashboard:
         )
 
     def create_visualization_panels(self):
-        """Create visualization panels for metrics and materials"""
         # Create metrics panel
         metrics_panel = ttk.LabelFrame(self.viz_column, style="TLabelframe")
         metrics_panel.pack(fill="x", expand=False, pady=(0, PAD_Y_PANEL))
@@ -1127,7 +1042,6 @@ class CircularEconomyDashboard:
        
         
     def create_livegraph_panel(self):
-        """Create panel for saving and comparing records"""
         # old version:  Live Metrics Visualization
         livegraph_panel = ttk.LabelFrame(self.viz_column)
         livegraph_panel.pack(fill="both", expand=True, pady=0)
@@ -1166,7 +1080,6 @@ class CircularEconomyDashboard:
         )
     
     def create_calculation_tabs(self):
-        """Create tabs for calculation details and info"""
         notebook_frame = ttk.Frame(self.root)
         notebook_frame.pack(fill="x", padx=10, pady=(0, 10))
         
@@ -1186,11 +1099,9 @@ class CircularEconomyDashboard:
         notebook.add(info_tab, text="Info")
     
     def create_input_widgets(self):
-        """Create the actual input widgets with circular controls"""
         # Configure panel for dark background
         self.input_panel.configure(style="TLabelframe")
         
-        # —— 合并后的分组标题 + 副标题（仍在 Input Parameters 面板内） ——
         reuse_title = ttk.Label(
             self.input_panel,
             text="Zirkularitätsquoten (%)",
@@ -1208,7 +1119,6 @@ class CircularEconomyDashboard:
             style="Panel.TLabel",
         ).pack(anchor="w", padx=10, pady=(0, 6))
 
-        # —— 控件网格：2 行 × 3 列（最后一格留空） ——
         controls_grid = ttk.Frame(self.input_panel, style="Panel.TFrame")
         controls_grid.pack(fill="x", padx=10, pady=(0, 8))
 
@@ -1220,7 +1130,7 @@ class CircularEconomyDashboard:
             ("Housing\nRecycling", self.housing_recycling_percent),
         ]
 
-        self.knob_widgets = []  # 保存 5 个 CircularControl 实例，顺序与 cells 保持一致
+        self.knob_widgets = []
 
         for idx, (lbl, var) in enumerate(cells):
             r, c = divmod(idx, 3)
@@ -1240,12 +1150,6 @@ class CircularEconomyDashboard:
         for col in (0, 1, 2):
             controls_grid.grid_columnconfigure(col, weight=1)
 
-        # 约定 5 个旋钮与 Poti 顺序的对应关系：
-        # P1 -> Wasserzähler Reuse
-        # P2 -> Impeller Remanufacturing
-        # P3 -> Housing Remanufacturing
-        # P4 -> Impeller Recycling
-        # P5 -> Housing Recycling
         if len(self.knob_widgets) >= 5:
             self.knob_meter_reuse        = self.knob_widgets[0]
             self.knob_impeller_reman     = self.knob_widgets[1]
@@ -1265,7 +1169,6 @@ class CircularEconomyDashboard:
 
         mix_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
         mix_frame.pack(fill="x", padx=10, pady=5)
-        # ——— 电价面板 ———
         price_frame = ttk.Frame(mix_frame, style="Panel.TFrame")
         price_frame.pack(fill="x", pady=5)
 
@@ -1293,10 +1196,8 @@ class CircularEconomyDashboard:
         self.realtime_price_entry.pack(side="left", padx=(10,2))
         ttk.Label(price_frame, text="€/kWh", style="Panel.TLabel").pack(side="left")
 
-        # 默认禁用，只有勾选"使用实时电价"才可编辑
         self.realtime_price_entry.config(state="disabled")
 
-        # 太阳能
         solar_row = ttk.Frame(mix_frame, style="Panel.TFrame")
         solar_row.pack(fill="x", pady=2)
         ttk.Label(solar_row, text="Solar (%)", style="Value.TLabel", width=10).pack(side="left")
@@ -1307,7 +1208,6 @@ class CircularEconomyDashboard:
         self.solar_val_label = ttk.Label(solar_row, text=f"{self.solar_pct.get():.0f}%", style="Value.TLabel", width=4)
         self.solar_val_label.pack(side="right")
 
-        # 风能
         wind_row = ttk.Frame(mix_frame, style="Panel.TFrame")
         wind_row.pack(fill="x", pady=2)
         ttk.Label(wind_row, text="Wind (%)", style="Value.TLabel", width=10).pack(side="left")
@@ -1318,7 +1218,6 @@ class CircularEconomyDashboard:
         self.wind_val_label = ttk.Label(wind_row, text=f"{self.wind_pct.get():.0f}%", style="Value.TLabel", width=4)
         self.wind_val_label.pack(side="right")
 
-        # 化石能源
         fossil_row = ttk.Frame(mix_frame, style="Panel.TFrame")
         fossil_row.pack(fill="x", pady=2)
         ttk.Label(fossil_row, text="Fossil (%)", style="Value.TLabel", width=10).pack(side="left")
@@ -1329,7 +1228,6 @@ class CircularEconomyDashboard:
         self.fossil_val_label = ttk.Label(fossil_row, text=f"{self.fossil_pct.get():.0f}%", style="Value.TLabel", width=4)
         self.fossil_val_label.pack(side="right")
 
-        # 其他
         rest_row = ttk.Frame(mix_frame, style="Panel.TFrame")
         rest_row.pack(fill="x", pady=2)
         ttk.Label(rest_row, text="Rest (%)", style="Value.TLabel", width=10).pack(side="left")
@@ -1340,19 +1238,15 @@ class CircularEconomyDashboard:
         self.rest_val_label = ttk.Label(rest_row, text=f"{self.rest_pct.get():.0f}%", style="Value.TLabel", width=4)
         self.rest_val_label.pack(side="right")
 
-        # 总和校验
         self.energy_sum_label = ttk.Label(mix_frame, text="Gesamt: 100%", style="Value.TLabel")
         self.energy_sum_label.pack(pady=(5, 0))
         
-        # Current energy mix display - 使用 StringVar 动态更新
         mix_display_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
         mix_display_frame.pack(fill="x", padx=10, pady=(0, 10))
         
-        # 创建动态更新的 StringVar
         self.energy_mix_display = tk.StringVar()
         self.price_display = tk.StringVar()
         
-        # 第1行：Energiemix（可自动换行）
         ttk.Label(
             mix_display_frame,
             textvariable=self.energy_mix_display,
@@ -1361,7 +1255,6 @@ class CircularEconomyDashboard:
             wraplength=460
         ).pack(fill="x", padx=10)
 
-        # 第2行：Strompreis
         ttk.Label(
             mix_display_frame,
             textvariable=self.price_display,
@@ -1371,7 +1264,6 @@ class CircularEconomyDashboard:
         
         
     def create_calc_tab_content(self, parent):
-        """Create the calculations tab content"""
         # Create a scrollable text area
         calc_frame = ttk.Frame(parent, style="TFrame")
         calc_frame.pack(fill="both", expand=True, padx=10, pady=5)
@@ -1436,7 +1328,6 @@ class CircularEconomyDashboard:
         calc_text.config(state="disabled")
     
     def create_info_tab_content(self, parent):
-        """Create the info tab content"""
         info_frame = ttk.Frame(parent, style="TFrame")
         info_frame.pack(fill="both", expand=True, padx=10, pady=5)
         
@@ -1486,16 +1377,12 @@ The Scenario Comparison panel lets you save up to three records and compare thei
         self.calculate_and_update()
     
     def on_slider_change(self, changed, new_value):
-        """滑块变化处理"""
-        # 只有真实的用户拖动 Solar 才触发手动锁
         if changed == 'solar' and not self._auto_updating:
-            #print(f"用户手动调整Solar: {new_value:.1f}%")
             self._manual_lock = True
             self._solar_target = float(new_value)
-            self._auto_ramping = False  # 停止自动推进
+            self._auto_ramping = False
 
         if changed == 'wind' and not self._wind_auto_updating:
-            #print(f"用户手动调整Wind: {new_value:.1f}%")
             self._wind_manual_lock = True
             self._wind_target = float(new_value)
             self._wind_auto_ramping = False
@@ -1519,19 +1406,15 @@ The Scenario Comparison panel lets you save up to three records and compare thei
                     values[o] = max(0, values[o] - reduction)
         for s in sources:
             getattr(self, f"{s}_pct").set(values[s])
-        # 更新显示和计算
         self.update_energy_mix()
     
     def on_realtime_price_toggle(self):
-        """当实时电价开关切换时调用"""
         if self.use_realtime_price.get():
-            # 启用编辑，并立刻拉取最新价格
             self.realtime_price_entry.config(state="normal")
             self.fetch_realtime_price()
         else:
-            # 禁用编辑，回退到本地加权
             self.realtime_price_entry.config(state="disabled")
-            self.price_source.set("本地加权均值")
+            self.price_source.set("Lokaler gewichteter Mittelwert")
             self.update_price_display()
         self.calculate_and_update()
 
@@ -1545,19 +1428,17 @@ The Scenario Comparison panel lets you save up to three records and compare thei
         )
 
     def update_price_display(self):
-        """更新电价显示"""
         try:
             factors = getattr(self, 'factors', {'solar':0,'wind':0,'fossil':1,'rest':0})
             val = self.compute_avg_cost(factors)
-            src = self.price_source.get() if (self.use_realtime_price.get() and self.price_source.get() != "Lokaler Mittelwert") else "Lokaler Mittelwert"
+            src = self.price_source.get() if (self.use_realtime_price.get() and self.price_source.get() != "Lokaler gewichteter Mittelwert") else "Lokaler gewichteter Mittelwert"
             self.price_display.set(f"Aktueller Strompreis: {val:.2f} €/kWh (Quelle: {src})")
         except Exception as e:
             val = self.realtime_price.get()
             self.price_display.set(f"Aktueller Strompreis: {val:.2f} €/kWh (Quelle: Vorgabewert)")
-            print("更新电价显示时出错:", e)
+            print("Failed to update price display:", e)
     
     def update_energy_mix(self, *args):
-        """更新能源构成比例和显示"""
         s = self.solar_pct.get()
         w = self.wind_pct.get()
         f = self.fossil_pct.get()
@@ -1583,7 +1464,6 @@ The Scenario Comparison panel lets you save up to three records and compare thei
         else:
             self.energy_sum_label.config(text=f"Gesamt: {total_display:.0f}%", foreground=COLORS["positive"])
 
-        # 更新动态显示的能源构成和电价
         self.energy_mix_display.set(
             f"Aktueller Energiemix – Solar: {s:.0f} %, Wind: {w:.0f} %, "
             f"Fossil: {f:.0f} %, Rest: {r:.0f} %"
@@ -1602,7 +1482,6 @@ The Scenario Comparison panel lets you save up to three records and compare thei
         impeller_recycling_percent,
         factors,
     ):
-        """计算所有指标"""
 
         meter_reuse_percent = float(meter_reuse_percent)
         housing_remanufacturing_percent = float(housing_remanufacturing_percent)
@@ -1746,7 +1625,6 @@ The Scenario Comparison panel lets you save up to three records and compare thei
             impeller_recycling = float(self.impeller_recycling_percent.get())
             housing_recycling = float(self.housing_recycling_percent.get())
 
-            # 强制 baseline 为 0% reuse/recycle + 100% fossil
             baseline_factors = {'solar': 0.0, 'wind': 0.0, 'fossil': 1.0, 'rest': 0.0}
             baseline_metrics = self.calculate_metrics(0, 0, 0, 0, 0, baseline_factors)
 
@@ -1850,9 +1728,7 @@ The Scenario Comparison panel lets you save up to three records and compare thei
         self.records_chart.clear_records()
 
     def fetch_realtime_price(self):
-        """按当地时区取德国日内 24 小时平均电价，并更新界面"""
         try:
-            # 1) 计算当地“昨天00:00→次日00:00”并转 UTC 
             berlin = ZoneInfo("Europe/Berlin")
             today_local = datetime.datetime.now(berlin).date()
             yesterday = today_local - datetime.timedelta(days=1)
@@ -1862,7 +1738,6 @@ The Scenario Comparison panel lets you save up to three records and compare thei
                 datetime.time(0, 0), 
                 tzinfo=berlin
             )
-            # 注意：这里用 yesterday+1 天的 00:00
             local_end = datetime.datetime.combine(
                 yesterday + datetime.timedelta(days=1),
                 datetime.time(0, 0),
@@ -1873,7 +1748,6 @@ The Scenario Comparison panel lets you save up to three records and compare thei
             start_utc = local_start.astimezone(utc)
             end_utc   = local_end.astimezone(utc)
 
-            # 2) 发请求
             params = {
                 "securityToken": YOUR_API_KEY,
                 "documentType":  "A44",
@@ -1888,21 +1762,16 @@ The Scenario Comparison panel lets you save up to three records and compare thei
                 headers={"Accept": "application/xml"},
                 timeout=30
             )
-            # 调试输出 
-            #print("Request URL:", resp.url)
-            #print("Status Code:", resp.status_code)
-            #print("Raw Response:\n", resp.text)
             resp.raise_for_status()
 
-            # 3) 解析 XML + 命名空间 + 容错 
             root = ET.fromstring(resp.content)
             m = re.match(r'\{(.+)\}', root.tag)
             ns = {"ns": m.group(1)} if m else {}
 
             if root.tag.endswith("Acknowledgement_MarketDocument"):
                 txt = root.find(".//ns:text", ns)
-                reason = txt.text if txt is not None else "无详细原因"
-                raise RuntimeError(f"ENTSO‑E 响应：{reason}")
+                reason = txt.text if txt is not None else "No details provided"
+                raise RuntimeError(f"ENTSO-E response: {reason}")
 
             points = root.findall(".//ns:Point", ns)
             prices = []
@@ -1911,17 +1780,16 @@ The Scenario Comparison panel lets you save up to three records and compare thei
                 if pe is not None and pe.text:
                     prices.append(float(pe.text))
             if not prices:
-                raise RuntimeError("解析后无任何价格点")
+                raise RuntimeError("No price points parsed")
 
-            # ——— 4) 计算平均并更新界面 ———
             avg_mwh = sum(prices) / len(prices)
             avg_kwh = avg_mwh / 1000.0
             self.realtime_price.set(avg_kwh)
             self.price_source.set("ENTSO‑E")
 
         except Exception as err:
-            self.price_source.set("本地加权均值")
-            print("获取实时电价失败:", err)
+            self.price_source.set("Lokaler gewichteter Mittelwert")
+            print("Failed to fetch realtime electricity price:", err)
 
         finally:
             if self.use_realtime_price.get():
@@ -1929,7 +1797,6 @@ The Scenario Comparison panel lets you save up to three records and compare thei
             self.root.after(3600_000, self.fetch_realtime_price)
             
     def _start_serial(self, port_hint='COM3', baud=9600):
-        """启动串口线程，读取 Arduino 发来的 Solar/Wind 状态"""
         self._serial_stop = False
         if serial is None:
             print("pyserial is not installed. serial port functionality is disabled.")
@@ -1982,15 +1849,13 @@ The Scenario Comparison panel lets you save up to three records and compare thei
                         self._process_wind_state(wind_state)
                         continue
 
-                    # 新增：解析 5 个 Poti 数值行，比如：
-                    # "POTS: 123,456,789,0,1023"
                     m_pots = pat_pots.search(line)
                     if m_pots:
                         raw_values = [int(m_pots.group(i)) for i in range(1, 6)]
                         self._process_pot_values(raw_values)
                         continue
                 except Exception as e:
-                    print("串口读取异常：", e)
+                    print("Serial read error:", e)
                     time.sleep(0.2)
             try:
                 ser.close()
@@ -2002,88 +1867,81 @@ The Scenario Comparison panel lets you save up to three records and compare thei
 
     def _send_energy_mix_to_arduino(self):
         """
-        把当前 Energiemix 中的 Solar/Wind 占比通过串口发送给 Arduino。
+        Send current Solar/Wind mix shares to Arduino over serial.
 
-        发送格式为一行 ASCII 文本，例如：
+        Format example:
             EMIX: solar=0.25,wind=0.35
 
-        其中 solar 和 wind 是 0.0~1.0 之间的浮点数（占比，而不是百分数）。
-        如果串口未连接，则静默忽略。
+        solar and wind are shares between 0.0 and 1.0.
+        If no serial connection exists, do nothing.
         """
         try:
             ser = getattr(self, "_serial_port", None)
             if ser is None:
                 return
 
-            # 向 Arduino 发送“滑块的绝对百分比”（0-100），内部计算仍使用归一化 share
             solar_abs = clamp01(float(self.solar_pct.get()) / 100.0)
             wind_abs  = clamp01(float(self.wind_pct.get()) / 100.0)
 
             line = f"EMIX: solar={solar_abs:.3f},wind={wind_abs:.3f}\n"
             ser.write(line.encode("ascii", errors="ignore"))
         except Exception as e:
-            # 不要让异常中断 GUI，只打印日志
-            print("发送 Energiemix 到 Arduino 失败:", e)
+            print("Failed to send energy mix to Arduino:", e)
 
     def _process_arduino_state(self, new_state):
-        """处理 Arduino 状态变化"""
         old_state = self._solar_state
         self._solar_state = new_state
         if old_state != new_state:
-            print(f"Arduino状态变化: {old_state} -> {new_state}")
+            print(f"Arduino state changed: {old_state} -> {new_state}")
             if new_state == 'L':
-                print("检测到直射，开始向上推进")
+                print("Direct light detected, ramping up")
                 self._manual_lock = False
                 self._solar_target = 100.0
                 self._auto_ramping = True
             elif new_state == 'B':
-                print("检测到遮挡，开始向下推进")
+                print("Shade detected, ramping down")
                 self._manual_lock = False
                 self._solar_target = 0.0
                 self._auto_ramping = True
             else:  # Ambient
                 if old_state in ['L', 'B']:
-                    print("回到环境光，停止自动推进")
+                    print("Ambient light, stopping ramp")
                     self._auto_ramping = False
                     self._solar_target = float(self.solar_pct.get())
 
     def _process_wind_state(self, new_state: str):
-        """处理风力状态变化"""
         normalized = (new_state or '').upper()
         old_state = self._wind_state
         self._wind_state = normalized
         if old_state != normalized:
-            print(f"Wind状态变化: {old_state} -> {normalized}")
+            print(f"Wind state changed: {old_state} -> {normalized}")
 
         if normalized == 'SPINNING':
-            print("检测到风机旋转，启动向上推进")
+            print("Turbine spinning, ramping up")
             self._wind_manual_lock = False
             self._wind_target = 100.0
             self._wind_auto_ramping = True
         elif normalized == 'STOPPED':
-            #if not self._wind_manual_lock:
-            #    print("检测到风机停止，维持当前风能比例")'
             self._wind_auto_ramping = False
             self._wind_target = float(self.wind_pct.get())
 
     def _process_pot_values(self, raw_values):
         """
-        处理 Arduino 发送过来的 5 个 Poti 原始数值（0–1023）。
+        Handle 5 raw potentiometer values (0-1023) from Arduino.
 
-        串口行格式约定为：
+        Expected line format:
             POTS: v1,v2,v3,v4,v5
 
-        含义对应关系（索引从 0 开始）：
-            v1 -> Wasserzähler Reuse 旋钮
-            v2 -> Impeller Remanufacturing 旋钮
-            v3 -> Housing  Remanufacturing  旋钮
-            v4 -> Impeller Recycling  旋钮
-            v5 -> Housing  Recycling   旋钮
+        Mapping (0-based index):
+            v1 -> Wasserzaehler Reuse knob
+            v2 -> Impeller Remanufacturing knob
+            v3 -> Housing Remanufacturing knob
+            v4 -> Impeller Recycling knob
+            v5 -> Housing Recycling knob
         """
         if not isinstance(raw_values, (list, tuple)) or len(raw_values) != 5:
             return
 
-        # 将 0–1023 线性映射到 0–100%
         def to_percent(v):
             try:
                 v = int(v)
@@ -2094,7 +1952,6 @@ The Scenario Comparison panel lets you save up to three records and compare thei
 
         percents = [to_percent(v) for v in raw_values]
 
-        # 在主线程里更新 UI（Tkinter 不允许跨线程操作控件）
         def apply_to_ui():
             try:
                 if hasattr(self, "knob_meter_reuse"):
@@ -2104,13 +1961,11 @@ The Scenario Comparison panel lets you save up to three records and compare thei
                     self.knob_impeller_recycling.set_external_value(percents[3])
                     self.knob_housing_recycling.set_external_value(percents[4])
             except Exception as e:
-                print("应用 Poti 数值时出错:", e)
+                print("Failed to apply potentiometer values:", e)
 
-        # root 是 Tk 实例
         self.root.after(0, apply_to_ui)
 
     def _ramp_tick(self):
-        """定时推进 Solar/Wind 进度"""
         try:
             current_value = float(self.solar_pct.get())
             if self._auto_ramping and not self._manual_lock:
@@ -2128,13 +1983,12 @@ The Scenario Comparison panel lets you save up to three records and compare thei
 
                     self._auto_updating = True
                     try:
-                        # 使用统一入口以触发归一化逻辑
                         self.on_slider_change('solar', new_val)
                     finally:
                         self._auto_updating = False
                 else:
                     if self._auto_ramping:
-                        print(f"到达目标值 {target:.1f}%，停止推进")
+                        print(f"Reached target {target:.1f}%, stopping ramp")
                         self._auto_ramping = False
 
             current_wind = float(self.wind_pct.get())
@@ -2148,16 +2002,15 @@ The Scenario Comparison panel lets you save up to three records and compare thei
 
                     self._wind_auto_updating = True
                     try:
-                        # 通过统一逻辑更新以保持总和不超过 100%
                         self.on_slider_change('wind', new_wind)
                     finally:
                         self._wind_auto_updating = False
                 else:
                     if self._wind_auto_ramping:
-                        print(f"风能到达目标值 {target_wind:.1f}%，停止推进")
+                        print(f"Wind reached target {target_wind:.1f}%, stopping ramp")
                         self._wind_auto_ramping = False
         except Exception as e:
-            print("ramp出错：", e)
+            print("Ramp error:", e)
         finally:
             self.root.after(self._ramp_interval_ms, self._ramp_tick)
 
