@@ -766,11 +766,18 @@ class CircularEconomyDashboard:
         self.fetch_realtime_price()
 
 
-        # —— Solar 接管参数 —— 
-        self._solar_target = float(self.solar_pct.get())  # 目标值（0或100）
-        self._ramp_interval_ms = 50                       # 步进周期
-        self._ramp_up_sec = 10.0                           # 0→100 用时（秒）
-        self._ramp_dn_sec = 10.0                           # 100→0 用时（秒）
+        # ===== Solar 控制参数 =====
+        self._solar_target = float(self.solar_pct.get())  # 当前目标值
+        self._ramp_interval_ms = 50                      # 步进周期
+        self._ramp_up_sec = 10.0                          # 0→100 用时（秒）
+        self._ramp_dn_sec = 10.0                          # 100→0 用时（秒）
+
+        # 关键状态量
+        self._solar_state = 'A'            # 当前 Arduino 状态 A/L/B
+        self._last_solar_state = 'A'       # 上一次状态（备用）
+        self._manual_lock = False          # 手动调节后锁定，直到 L/B 再次出现
+        self._auto_updating = False        # 内部自动推进时置 True，避免误判为“手动”
+        self._auto_ramping = False         # 是否处于自动推进中
 
         # 启动串口读取（根据你的端口修改，如 Win: 'COM3' / Mac: '/dev/tty.usbserial-xxxx' / Linux: '/dev/ttyUSB0'）
         self._start_solar_serial(port_hint='COM5', baud=9600)
@@ -1141,6 +1148,14 @@ The Live Metrics Visualization panel lets you save up to three records and compa
         self.calculate_and_update()
     
     def on_slider_change(self, changed, new_value):
+        """滑块变化处理"""
+        # 只有真实的用户拖动 Solar 才触发手动锁
+        if changed == 'solar' and not self._auto_updating:
+            print(f"用户手动调整Solar: {new_value:.1f}%")
+            self._manual_lock = True
+            self._solar_target = float(new_value)
+            self._auto_ramping = False  # 停止自动推进
+
         # changed: one of the energy sources
         sources = ['solar', 'wind', 'fossil', 'rest']
         values = {s: getattr(self, f"{s}_pct").get() for s in sources}
@@ -1494,18 +1509,18 @@ The Live Metrics Visualization panel lets you save up to three records and compa
             self.root.after(3600_000, self.fetch_realtime_price)
             
     def _start_solar_serial(self, port_hint='COM3', baud=9600):
-        """启动串口线程，解析 Arduino 发来的 state=A/L/B"""
-        self._solar_state = 'A'
+        """启动串口线程，读取 Arduino 发来的 state=A/L/B"""
         self._serial_stop = False
         if serial is None:
-            print("pyserial 未安装，Solar 串口功能禁用（pip install pyserial 可启用）")
+            print("pyserial 未安装，Solar 串口功能禁用")
             return
 
         def worker():
             ports_to_try = [port_hint, 'COM4', 'COM5', '/dev/ttyUSB0', '/dev/ttyACM0', '/dev/tty.usbserial-1410']
             ser = None
             for p in ports_to_try:
-                if not p: continue
+                if not p:
+                    continue
                 try:
                     ser = serial.Serial(p, baudrate=baud, timeout=1)
                     print(f"SOLAR串口连接: {p}")
@@ -1513,7 +1528,7 @@ The Live Metrics Visualization panel lets you save up to three records and compa
                 except Exception:
                     continue
             if ser is None:
-                print("未能连接到任何串口（手动改 _start_solar_serial 的 port_hint）")
+                print("未能连接到任何串口")
                 return
 
             pat = re.compile(r"raw=(\d+),base=(\d+),state=([ALB])")
@@ -1523,41 +1538,67 @@ The Live Metrics Visualization panel lets you save up to three records and compa
                     m = pat.search(line)
                     if m:
                         raw, base, st = int(m.group(1)), int(m.group(2)), m.group(3)
-                        # 根据状态设定目标值（Ambient不动）
-                        if st == 'L':
-                            self._solar_target = 100.0
-                        elif st == 'B':
-                            self._solar_target = 0.0
-                        # st == 'A' -> 不改变目标
-                        self._solar_state = st
-                        # 也可以：print(f"SOLAR {raw=} {base=} {st=}")
+                        self._process_arduino_state(st)
                 except Exception as e:
                     print("串口读取异常：", e)
                     time.sleep(0.2)
-            try: ser.close()
-            except: pass
+            try:
+                ser.close()
+            except:
+                pass
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def _process_arduino_state(self, new_state):
+        """处理 Arduino 状态变化"""
+        old_state = self._solar_state
+        self._solar_state = new_state
+        if old_state != new_state:
+            print(f"Arduino状态变化: {old_state} -> {new_state}")
+            if new_state == 'L':
+                print("检测到直射，开始向上推进")
+                self._manual_lock = False
+                self._solar_target = 100.0
+                self._auto_ramping = True
+            elif new_state == 'B':
+                print("检测到遮挡，开始向下推进")
+                self._manual_lock = False
+                self._solar_target = 0.0
+                self._auto_ramping = True
+            else:  # Ambient
+                if old_state in ['L', 'B']:
+                    print("回到环境光，停止自动推进")
+                    self._auto_ramping = False
+                    self._solar_target = float(self.solar_pct.get())
+
     def _ramp_tick(self):
-        """每隔 _ramp_interval_ms 让 solar_pct 匀速靠近 _solar_target"""
+        """定时推进 Solar 进度"""
         try:
-            cur = float(self.solar_pct.get())
-            if abs(cur - self._solar_target) > 0.5:
-                # 计算步长
-                if self._solar_target > cur:
-                    # ramp-up
-                    step_per_sec = 100.0 / max(0.1, self._ramp_up_sec)
+            current_value = float(self.solar_pct.get())
+            if self._auto_ramping and not self._manual_lock:
+                target = self._solar_target
+                tolerance = 0.5
+                if abs(current_value - target) > tolerance:
+                    if target > current_value:
+                        step_per_sec = 100.0 / max(0.1, self._ramp_up_sec)
+                        step = step_per_sec * (self._ramp_interval_ms / 1000.0)
+                        new_val = min(target, current_value + step)
+                    else:
+                        step_per_sec = 100.0 / max(0.1, self._ramp_dn_sec)
+                        step = step_per_sec * (self._ramp_interval_ms / 1000.0)
+                        new_val = max(target, current_value - step)
+
+                    self._auto_updating = True
+                    try:
+                        self.solar_pct.set(new_val)
+                        self.solar_val_label.config(text=f"{new_val:.0f}%")
+                        self.update_energy_mix()
+                    finally:
+                        self._auto_updating = False
                 else:
-                    # ramp-down
-                    step_per_sec = 100.0 / max(0.1, self._ramp_dn_sec)
-                step = step_per_sec * (self._ramp_interval_ms / 1000.0)
-                new_val = cur + step if self._solar_target > cur else cur - step
-                new_val = max(0.0, min(100.0, new_val))
-                # 通过你的已有函数进行重平衡 & 刷新UI
-                self.on_slider_change('solar', new_val)
-                self.solar_val_label.config(text=f"{self.solar_pct.get():.0f}%")
-            # Ambient时，小波动不动：我们根本不改变 _solar_target，满足“室内细微波动不变化”
+                    if self._auto_ramping:
+                        print(f"到达目标值 {target:.1f}%，停止推进")
+                        self._auto_ramping = False
         except Exception as e:
             print("ramp出错：", e)
         finally:
