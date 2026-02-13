@@ -22,8 +22,30 @@ except ImportError:
     serial = None
 
 # Reference values for material consumption
-REF_BRASS = 0.5   # kg per unit  0.8 → 0.5
-REF_PLASTIC = 0.2  # kg per unit  0.02 → 0.2
+mass_brass_per_housing_kg = 0.5   # kg per housing unit
+mass_plastic_per_impeller_kg = 0.2  # kg per impeller unit
+
+
+def clamp01(x: float) -> float:
+    """Clamp a numeric value to the inclusive range [0, 1]."""
+
+    if x < 0.0:
+        return 0.0
+    if x > 1.0:
+        return 1.0
+    return x
+
+
+def to_rate(percent_value: float) -> float:
+    """Convert a 0–100 percentage to a normalized rate in [0, 1]."""
+
+    return clamp01(round(float(percent_value), 4) / 100.0)
+
+
+def safe_divide(numerator: float, denominator: float) -> float:
+    """Divide with zero protection for very small denominators."""
+
+    return 0.0 if abs(denominator) < 1e-12 else numerator / denominator
 
 # API 密钥 (需要替换为实际的密钥)
 YOUR_API_KEY = "46b6d9c5-1c8a-4dc0-bb0b-eaf380ec0f6a"
@@ -601,8 +623,8 @@ class RecordBarChart(FuturisticChart):
             "energy": COLORS["metric1"],
             "co2": COLORS["metric3"],
             "cost": COLORS["metric2"],
-            "brass": COLORS["material1"],
-            "plastic": COLORS["material2"],
+            "virgin_brass_kg": COLORS["material1"],
+            "virgin_plastic_kg": COLORS["material2"],
         }
 
         self.update_chart()
@@ -627,7 +649,7 @@ class RecordBarChart(FuturisticChart):
             self.draw_legend()
             return
 
-        metrics = ["energy", "co2", "cost", "brass", "plastic"]
+        metrics = ["energy", "co2", "cost", "virgin_brass_kg", "virgin_plastic_kg"]
         max_value = max(max(record[m] for m in metrics) for record in self.records)
         if max_value == 0:
             max_value = 1
@@ -683,8 +705,8 @@ class RecordBarChart(FuturisticChart):
             ("Energy (kWh)", "energy"),
             ("CO2 (kg)", "co2"),
             ("Cost (EUR)", "cost"),
-            ("Brass (kg)", "brass"),
-            ("Plastic (kg)", "plastic"),
+            ("Brass (Virgin kg)", "virgin_brass_kg"),
+            ("Plastic (Virgin kg)", "virgin_plastic_kg"),
         ]
 
         spacing = LEGEND_SPACING
@@ -743,12 +765,12 @@ class CircularEconomyDashboard:
         self.create_livegraph_panel()
         
         # Create input variables
-        self.meter_reuse_pct = tk.DoubleVar(value=0.0)
-        self.reman_impeller_pct = tk.DoubleVar(value=0.0)
-        self.reman_housing_pct = tk.DoubleVar(value=0.0)
+        self.meter_reuse_percent = tk.DoubleVar(value=0.0)
+        self.impeller_remanufacturing_percent = tk.DoubleVar(value=0.0)
+        self.housing_remanufacturing_percent = tk.DoubleVar(value=0.0)
         # Individual recycling rates for each component
-        self.recycle_impeller_pct = tk.DoubleVar(value=0.0)
-        self.recycle_housing_pct = tk.DoubleVar(value=0.0)
+        self.impeller_recycling_percent = tk.DoubleVar(value=0.0)
+        self.housing_recycling_percent = tk.DoubleVar(value=0.0)
         
         self.solar_pct = tk.DoubleVar(value=int(STANDARD_ENERGY_MIX["solar"] * 100))
         self.wind_pct = tk.DoubleVar(value=int(STANDARD_ENERGY_MIX["wind"] * 100))
@@ -765,15 +787,15 @@ class CircularEconomyDashboard:
 
         self.energy_baseline = tk.DoubleVar(value=default_energy)
         self.co2_baseline = tk.DoubleVar(value=9.0)
-        self.brass_baseline = tk.DoubleVar(value=REF_BRASS)
-        self.plastic_baseline = tk.DoubleVar(value=REF_PLASTIC)
+        self.brass_baseline = tk.DoubleVar(value=mass_brass_per_housing_kg)
+        self.plastic_baseline = tk.DoubleVar(value=mass_plastic_per_impeller_kg)
         self.cost_baseline = tk.DoubleVar(value=default_cost)
         self.energy_cost_baseline = tk.DoubleVar(value=default_energy_cost)
 
         self.energy_current = tk.DoubleVar(value=default_energy)
         self.co2_current = tk.DoubleVar(value=9.0)
-        self.brass_current = tk.DoubleVar(value=REF_BRASS)
-        self.plastic_current = tk.DoubleVar(value=REF_PLASTIC)
+        self.brass_current = tk.DoubleVar(value=mass_brass_per_housing_kg)
+        self.plastic_current = tk.DoubleVar(value=mass_plastic_per_impeller_kg)
         self.cost_current = tk.DoubleVar(value=default_cost)
         self.energy_cost_current = tk.DoubleVar(value=default_energy_cost)
         
@@ -840,12 +862,21 @@ class CircularEconomyDashboard:
         self.metrics_chart.pack(fill="x", expand=False, padx=PAD_X, pady=(0, PAD_Y_SMALL))
 
         # Create materials panel
-        materials_panel = ttk.LabelFrame(self.viz_column, text="Materials Breakdown", style="TLabelframe")
+        materials_panel = ttk.LabelFrame(
+            self.viz_column, text="Virgin Material Demand (kg)", style="TLabelframe"
+        )
         materials_panel.pack(fill="x", expand=False, pady=(0, PAD_Y_PANEL))
 
         # Create materials chart
         self.materials_chart = ComparisonChart(materials_panel, width=CHART_W_RIGHT, height=CHART_H_MATERIALS)
         self.materials_chart.pack(fill="x", expand=False, padx=PAD_X, pady=(0, PAD_Y_SMALL))
+        self.total_virgin_label = ttk.Label(
+            materials_panel,
+            text="Total Virgin Demand: 0.00 kg",
+            style="Panel.TLabel",
+            anchor="w",
+        )
+        self.total_virgin_label.pack(fill="x", padx=PAD_X, pady=(0, PAD_Y_SMALL))
         
     def create_livegraph_panel(self):
         """Create panel for saving and comparing records"""
@@ -919,11 +950,11 @@ class CircularEconomyDashboard:
         controls_grid.pack(fill="x", padx=10, pady=(0, 8))
 
         cells = [
-            ("Wasserzähler\nReuse", self.meter_reuse_pct),
-            ("Impeller\nRemanufacturing", self.reman_impeller_pct),
-            ("Housing\nRemanufacturing", self.reman_housing_pct),
-            ("Impeller\nRecycling", self.recycle_impeller_pct),
-            ("Housing\nRecycling", self.recycle_housing_pct),
+            ("Wasserzähler\nReuse", self.meter_reuse_percent),
+            ("Impeller\nRemanufacturing", self.impeller_remanufacturing_percent),
+            ("Housing\nRemanufacturing", self.housing_remanufacturing_percent),
+            ("Impeller\nRecycling", self.impeller_recycling_percent),
+            ("Housing\nRecycling", self.housing_recycling_percent),
         ]
 
         for idx, (lbl, var) in enumerate(cells):
@@ -1063,19 +1094,19 @@ class CircularEconomyDashboard:
         
         # Energy calculation
         calc_text.insert("end", "1. ENERGY CONSUMPTION\n", "subheading")
-        calc_text.insert("end", "Formula: energy = Q_whole*E_reused + (1-R_meter)*(w_h*(R_rem_h*E_reman + (1-R_rem_h)*E_new) + w_i*(R_rem_i*E_reman + (1-R_rem_i)*E_new))\n\n")
+        calc_text.insert("end", "Formula: energy = meter_reuse_rate*E_reused + (1-meter_reuse_rate)*(w_h*(housing_remanufacturing_rate*E_reman + (1-housing_remanufacturing_rate)*E_new) + w_i*(impeller_remanufacturing_rate*E_reman + (1-impeller_remanufacturing_rate)*E_new))\n\n")
         calc_text.insert("end", "Where:\n")
-        calc_text.insert("end", "- Q_whole = meter_reuse_pct / 100\n")
-        calc_text.insert("end", "- R_rem_h / R_rem_i = remanufacturing shares of housing / impeller\n")
+        calc_text.insert("end", "- meter_reuse_rate = to_rate(meter_reuse_percent)\n")
+        calc_text.insert("end", "- housing_remanufacturing_rate / impeller_remanufacturing_rate = to_rate(...)\n")
         calc_text.insert("end", "- w_h / w_i = cost weights based on new component prices\n")
         calc_text.insert("end", "- E_new = 20.0 kWh, E_reman = 16.5 kWh, E_reused = 14.0 kWh\n\n")
 
         # CO2 calculation
         calc_text.insert("end", "2. CO2 EMISSIONS\n", "subheading")
-        calc_text.insert("end", "Formula: co2 = energy * avg_co2_mix * (1 - 0.5 * secondary_share)\n\n")
+        calc_text.insert("end", "Formula: co2 = energy * avg_co2_mix * (1 - 0.5 * secondary_share_in_new_build)\n\n")
         calc_text.insert("end", "Where:\n")
         calc_text.insert("end", "- avg_co2_mix = weighted CO₂ factor from the selected energy mix (kg/kWh)\n")
-        calc_text.insert("end", "- secondary_share = secondary_material / total_material\n")
+        calc_text.insert("end", "- secondary_share_in_new_build = secondary_material / new_build_total_material\n")
         calc_text.insert("end", "- Secondary materials cut emissions by up to 50%\n\n")
 
         # Energy cost calculation
@@ -1085,19 +1116,19 @@ class CircularEconomyDashboard:
 
         # Component cost calculation
         calc_text.insert("end", "4. COMPONENT COST\n", "subheading")
-        calc_text.insert("end", "Housing cost = Q_whole*C_reused + (1-R_meter)*(R_rem_h*C_reman + (1-R_rem_h)*C_new)\n")
-        calc_text.insert("end", "Impeller cost = Q_whole*C_reused + (1-R_meter)*(R_rem_i*C_reman + (1-R_rem_i)*C_new)\n")
+        calc_text.insert("end", "Housing cost = meter_reuse_rate*C_reused + (1-meter_reuse_rate)*(housing_remanufacturing_rate*C_reman + (1-housing_remanufacturing_rate)*C_new)\n")
+        calc_text.insert("end", "Impeller cost = meter_reuse_rate*C_reused + (1-meter_reuse_rate)*(impeller_remanufacturing_rate*C_reman + (1-impeller_remanufacturing_rate)*C_new)\n")
         calc_text.insert("end", "Component cost = housing cost + impeller cost\n\n")
 
         # Material calculation
         calc_text.insert("end", "5. MATERIALS\n", "subheading")
         calc_text.insert(
             "end",
-            "Brass: REF_BRASS * Q_new_housing split into virgin / secondary by share_sec_housing\n",
+            "Brass (Virgin): mass_brass_per_housing_kg * new_housing_share * (1 - housing_recycling_rate)\n",
         )
         calc_text.insert(
             "end",
-            "Plastic: REF_PLASTIC * Q_new_impeller split into virgin / secondary by share_sec_impeller\n\n",
+            "Plastic (Virgin): mass_plastic_per_impeller_kg * new_impeller_share * (1 - impeller_recycling_rate)\n\n",
         )
         
         # Configure tags for styling
@@ -1137,6 +1168,7 @@ Energy Consumption:
 Material Consumption:
 - Remanufacturing lowers demand in proportion to each component's reman share
 - Recycling supplies secondary feedstock for the remaining new-build fraction
+- Virgin Material Demand chart focuses on brass/plastic that must be mined (virgin feedstock)
 - Secondary feedstock can reduce lifecycle CO₂ emissions by up to 50%
 
 The dashboard compares the baseline scenario (0% reuse, 0% recycle, USA energy) with your current settings.
@@ -1264,47 +1296,66 @@ The Scenario Comparison panel lets you save up to three records and compare thei
     
     def calculate_metrics(
         self,
-        meter_reuse_pct,
-        reman_housing_pct,
-        reman_impeller_pct,
-        recycle_housing_pct,
-        recycle_impeller_pct,
+        meter_reuse_percent,
+        housing_remanufacturing_percent,
+        impeller_remanufacturing_percent,
+        housing_recycling_percent,
+        impeller_recycling_percent,
         factors,
     ):
         """计算所有指标"""
 
-        meter_reuse_pct = float(meter_reuse_pct)
-        reman_housing_pct = float(reman_housing_pct)
-        reman_impeller_pct = float(reman_impeller_pct)
-        recycle_housing_pct = float(recycle_housing_pct)
-        recycle_impeller_pct = float(recycle_impeller_pct)
+        meter_reuse_percent = float(meter_reuse_percent)
+        housing_remanufacturing_percent = float(housing_remanufacturing_percent)
+        impeller_remanufacturing_percent = float(impeller_remanufacturing_percent)
+        housing_recycling_percent = float(housing_recycling_percent)
+        impeller_recycling_percent = float(impeller_recycling_percent)
 
-        R_meter = meter_reuse_pct / 100.0
-        R_rem_h = reman_housing_pct / 100.0
-        R_rem_i = reman_impeller_pct / 100.0
-        R_rec_h = recycle_housing_pct / 100.0
-        R_rec_i = recycle_impeller_pct / 100.0
+        meter_reuse_rate = to_rate(meter_reuse_percent)
+        housing_remanufacturing_rate = to_rate(housing_remanufacturing_percent)
+        impeller_remanufacturing_rate = to_rate(impeller_remanufacturing_percent)
+        housing_recycling_rate = to_rate(housing_recycling_percent)
+        impeller_recycling_rate = to_rate(impeller_recycling_percent)
 
-        Q_whole = R_meter
-        Q_rem_housing = (1 - R_meter) * R_rem_h
-        Q_rem_impeller = (1 - R_meter) * R_rem_i
+        reuse_share = meter_reuse_rate
+        new_share_factor = 1.0 - meter_reuse_rate
+        new_housing_share = new_share_factor * (1.0 - housing_remanufacturing_rate)
+        new_impeller_share = new_share_factor * (1.0 - impeller_remanufacturing_rate)
 
-        Q_new_housing  = (1.0 - R_meter) * (1.0 - R_rem_h)
-        Q_new_impeller = (1.0 - R_meter) * (1.0 - R_rem_i)
+        virgin_brass_kg = (
+            mass_brass_per_housing_kg
+            * new_housing_share
+            * (1.0 - housing_recycling_rate)
+        )
+        secondary_brass_kg = (
+            mass_brass_per_housing_kg
+            * new_housing_share
+            * housing_recycling_rate
+        )
+        virgin_plastic_kg = (
+            mass_plastic_per_impeller_kg
+            * new_impeller_share
+            * (1.0 - impeller_recycling_rate)
+        )
+        secondary_plastic_kg = (
+            mass_plastic_per_impeller_kg
+            * new_impeller_share
+            * impeller_recycling_rate
+        )
 
-        Q_sec_brass = (1 - R_meter) * (1 - R_rem_h) * R_rec_h
-        Q_sec_plastic = (1 - R_meter) * (1 - R_rem_i) * R_rec_i
+        total_virgin_kg = virgin_brass_kg + virgin_plastic_kg
+        secondary_total_kg = secondary_brass_kg + secondary_plastic_kg
+        new_build_total_material_kg = total_virgin_kg + secondary_total_kg
+        secondary_share_in_new_build = safe_divide(
+            secondary_total_kg, new_build_total_material_kg
+        )
 
-        share_sec_housing  = 0.0 if Q_new_housing  <= 1e-12 else R_rec_h
-        share_sec_impeller = 0.0 if Q_new_impeller <= 1e-12 else R_rec_i
-
-        virgin_brass = REF_BRASS * Q_new_housing * (1 - share_sec_housing)
-        secondary_brass = REF_BRASS * Q_new_housing * share_sec_housing
-        virgin_plastic = REF_PLASTIC * Q_new_impeller * (1 - share_sec_impeller)
-        secondary_plastic = REF_PLASTIC * Q_new_impeller * share_sec_impeller
-
-        brass_kg = virgin_brass + secondary_brass
-        plastic_kg = virgin_plastic + secondary_plastic
+        baseline_virgin_brass_kg = mass_brass_per_housing_kg
+        baseline_virgin_plastic_kg = mass_plastic_per_impeller_kg
+        baseline_total_virgin_kg = (
+            baseline_virgin_brass_kg + baseline_virgin_plastic_kg
+        )
+        virgin_avoided_kg = max(0.0, baseline_total_virgin_kg - total_virgin_kg)
 
         housing_new = COMPONENT_COSTS["housing"]["new"]
         impeller_new = COMPONENT_COSTS["impeller"]["new"]
@@ -1312,18 +1363,20 @@ The Scenario Comparison panel lets you save up to three records and compare thei
         w_i = 1.0 - w_h
 
         energy_kwh = (
-            Q_whole * ENERGY_CONSUMPTION["reused"]
-            + (1 - R_meter)
+            reuse_share * ENERGY_CONSUMPTION["reused"]
+            + new_share_factor
             * (
                 w_h
                 * (
-                    R_rem_h * ENERGY_CONSUMPTION["reman"]
-                    + (1 - R_rem_h) * ENERGY_CONSUMPTION["new"]
+                    housing_remanufacturing_rate * ENERGY_CONSUMPTION["reman"]
+                    + (1.0 - housing_remanufacturing_rate)
+                    * ENERGY_CONSUMPTION["new"]
                 )
                 + w_i
                 * (
-                    R_rem_i * ENERGY_CONSUMPTION["reman"]
-                    + (1 - R_rem_i) * ENERGY_CONSUMPTION["new"]
+                    impeller_remanufacturing_rate * ENERGY_CONSUMPTION["reman"]
+                    + (1.0 - impeller_remanufacturing_rate)
+                    * ENERGY_CONSUMPTION["new"]
                 )
             )
         )
@@ -1335,11 +1388,13 @@ The Scenario Comparison panel lets you save up to three records and compare thei
         C_i_reman = COMPONENT_COSTS["impeller"]["reman"]
         C_i_reused = COMPONENT_COSTS["impeller"]["reused"]
 
-        cost_housing = Q_whole * C_h_reused + (1 - R_meter) * (
-            R_rem_h * C_h_reman + (1 - R_rem_h) * C_h_new
+        cost_housing = reuse_share * C_h_reused + new_share_factor * (
+            housing_remanufacturing_rate * C_h_reman
+            + (1.0 - housing_remanufacturing_rate) * C_h_new
         )
-        cost_impeller = Q_whole * C_i_reused + (1 - R_meter) * (
-            R_rem_i * C_i_reman + (1 - R_rem_i) * C_i_new
+        cost_impeller = reuse_share * C_i_reused + new_share_factor * (
+            impeller_remanufacturing_rate * C_i_reman
+            + (1.0 - impeller_remanufacturing_rate) * C_i_new
         )
 
         component_cost_eur = cost_housing + cost_impeller
@@ -1352,14 +1407,10 @@ The Scenario Comparison panel lets you save up to three records and compare thei
             price_source=self.price_source.get(),
         )
 
-        total_material = brass_kg + plastic_kg
-        secondary_share = (
-            0.0
-            if total_material <= 1e-9
-            else (secondary_brass + secondary_plastic) / total_material
+        co2_kg = energy_kwh * avg_co2_kg_per_kwh * (
+            1 - 0.5 * secondary_share_in_new_build
         )
-
-        co2_kg = energy_kwh * avg_co2_kg_per_kwh * (1 - 0.5 * secondary_share)
+        co2_kg = max(0.0, co2_kg)
         energy_cost_eur = energy_kwh * avg_price_eur_per_kwh
         total_cost_for_plot = component_cost_eur + energy_cost_eur
 
@@ -1367,20 +1418,34 @@ The Scenario Comparison panel lets you save up to three records and compare thei
             "energy": energy_kwh,
             "energy_cost": energy_cost_eur,
             "co2": co2_kg,
-            "brass": brass_kg,
-            "plastic": plastic_kg,
+            "brass": virgin_brass_kg,
+            "plastic": virgin_plastic_kg,
             "component_cost": component_cost_eur,
             "total_cost": total_cost_for_plot,
+            "virgin_brass_kg": virgin_brass_kg,
+            "virgin_plastic_kg": virgin_plastic_kg,
+            "total_virgin_kg": total_virgin_kg,
+            "virgin_avoided_kg": virgin_avoided_kg,
+            "secondary_share_in_new_build": secondary_share_in_new_build,
+            "secondary_brass_kg": secondary_brass_kg,
+            "secondary_plastic_kg": secondary_plastic_kg,
+            "baseline_virgin_brass_kg": baseline_virgin_brass_kg,
+            "baseline_virgin_plastic_kg": baseline_virgin_plastic_kg,
+            "baseline_total_virgin_kg": baseline_total_virgin_kg,
         }
     
     def calculate_and_update(self):
         try:
-            meter_reuse = float(self.meter_reuse_pct.get())
-            reman_impeller = float(self.reman_impeller_pct.get())
-            reman_housing = float(self.reman_housing_pct.get())
+            meter_reuse = float(self.meter_reuse_percent.get())
+            impeller_remanufacturing = float(
+                self.impeller_remanufacturing_percent.get()
+            )
+            housing_remanufacturing = float(
+                self.housing_remanufacturing_percent.get()
+            )
 
-            recycle_impeller = float(self.recycle_impeller_pct.get())
-            recycle_housing = float(self.recycle_housing_pct.get())
+            impeller_recycling = float(self.impeller_recycling_percent.get())
+            housing_recycling = float(self.housing_recycling_percent.get())
 
             # 强制 baseline 为 0% reuse/recycle + 100% fossil
             baseline_factors = {'solar': 0.0, 'wind': 0.0, 'fossil': 1.0, 'rest': 0.0}
@@ -1389,10 +1454,10 @@ The Scenario Comparison panel lets you save up to three records and compare thei
             # Calculate current metrics
             current_metrics = self.calculate_metrics(
                 meter_reuse,
-                reman_housing,
-                reman_impeller,
-                recycle_housing,
-                recycle_impeller,
+                housing_remanufacturing,
+                impeller_remanufacturing,
+                housing_recycling,
+                impeller_recycling,
                 self.factors,
             )
             
@@ -1400,15 +1465,15 @@ The Scenario Comparison panel lets you save up to three records and compare thei
             self.energy_baseline.set(baseline_metrics['energy'])
             self.energy_cost_baseline.set(baseline_metrics['energy_cost'])
             self.co2_baseline.set(baseline_metrics['co2'])
-            self.brass_baseline.set(baseline_metrics['brass'])
-            self.plastic_baseline.set(baseline_metrics['plastic'])
+            self.brass_baseline.set(baseline_metrics['baseline_virgin_brass_kg'])
+            self.plastic_baseline.set(baseline_metrics['baseline_virgin_plastic_kg'])
             self.cost_baseline.set(baseline_metrics['component_cost'])
             
             self.energy_current.set(current_metrics['energy'])
             self.energy_cost_current.set(current_metrics['energy_cost'])
             self.co2_current.set(current_metrics['co2'])
-            self.brass_current.set(current_metrics['brass'])
-            self.plastic_current.set(current_metrics['plastic'])
+            self.brass_current.set(current_metrics['virgin_brass_kg'])
+            self.plastic_current.set(current_metrics['virgin_plastic_kg'])
             self.cost_current.set(current_metrics['component_cost'])
             
             # Update charts
@@ -1431,17 +1496,26 @@ The Scenario Comparison panel lets you save up to three records and compare thei
             
             # Second chart: Materials comparison with units
             self.materials_chart.update_chart(
-                ["Brass", "Plastic"],
+                ["Brass (Virgin)", "Plastic (Virgin)"],
                 [
-                    baseline_metrics['brass'],
-                    baseline_metrics['plastic']
+                    baseline_metrics['baseline_virgin_brass_kg'],
+                    baseline_metrics['baseline_virgin_plastic_kg'],
                 ],
                 [
-                    current_metrics['brass'],
-                    current_metrics['plastic']
+                    current_metrics['virgin_brass_kg'],
+                    current_metrics['virgin_plastic_kg'],
                 ],
                 [COLORS["negative"], COLORS["material1"]],
-                ["kg", "kg"]  # Units for materials
+                ["kg", "kg"],
+            )
+
+            total_virgin = current_metrics['total_virgin_kg']
+            virgin_avoided = current_metrics['virgin_avoided_kg']
+            self.total_virgin_label.config(
+                text=(
+                    f"Total Virgin Demand: {total_virgin:.3f} kg "
+                    f"(Avoided vs baseline: {virgin_avoided:.3f} kg)"
+                )
             )
             
             
@@ -1449,32 +1523,34 @@ The Scenario Comparison panel lets you save up to three records and compare thei
             print(f"Error in calculation: {e}")
     def save_record(self):
         """Save the current metrics as a record"""
-        meter_reuse = int(self.meter_reuse_pct.get())
-        reman_impeller = int(self.reman_impeller_pct.get())
-        reman_housing = int(self.reman_housing_pct.get())
-        recycle_impeller = int(self.recycle_impeller_pct.get())
-        recycle_housing = int(self.recycle_housing_pct.get())
+        meter_reuse = int(self.meter_reuse_percent.get())
+        impeller_remanufacturing = int(
+            self.impeller_remanufacturing_percent.get()
+        )
+        housing_remanufacturing = int(self.housing_remanufacturing_percent.get())
+        impeller_recycling = int(self.impeller_recycling_percent.get())
+        housing_recycling = int(self.housing_recycling_percent.get())
 
         current_metrics = self.calculate_metrics(
             meter_reuse,
-            reman_housing,
-            reman_impeller,
-            recycle_housing,
-            recycle_impeller,
+            housing_remanufacturing,
+            impeller_remanufacturing,
+            housing_recycling,
+            impeller_recycling,
             self.factors,
         )
 
         record = {
             "label": f"Record {len(self.records_chart.records) + 1}",
             "meter_reuse": meter_reuse,
-            "reman_impeller": reman_impeller,
-            "reman_housing": reman_housing,
-            "recycle_impeller": recycle_impeller,
-            "recycle_housing": recycle_housing,
+            "reman_impeller": impeller_remanufacturing,
+            "reman_housing": housing_remanufacturing,
+            "recycle_impeller": impeller_recycling,
+            "recycle_housing": housing_recycling,
             "energy": current_metrics['energy'],
             "co2": current_metrics['co2'],
-            "brass": current_metrics['brass'],
-            "plastic": current_metrics['plastic'],
+            "virgin_brass_kg": current_metrics['virgin_brass_kg'],
+            "virgin_plastic_kg": current_metrics['virgin_plastic_kg'],
             "cost": current_metrics['total_cost'],
         }
         self.records_chart.add_record(record)
