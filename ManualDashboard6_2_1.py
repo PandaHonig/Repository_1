@@ -127,6 +127,21 @@ LEGEND_BOX          = 8
 
 SHOW_CALC_TABS = False
 
+BASE_W, BASE_H = 1200, 800   # 基准分辨率（当前设计尺寸）
+SCALE = 1.0                  # 运行时根据屏幕尺寸赋值
+
+
+def S(x: float) -> int:
+    """缩放像素尺寸：四舍五入为整数"""
+
+    return int(round(x * SCALE))
+
+
+def F(pt: float) -> int:
+    """缩放字体尺寸：设置下限 8pt，保证可读性"""
+
+    return max(8, int(round(pt * SCALE)))
+
 class CircularControl(tk.Canvas):
     """A futuristic circular control for setting percentage values"""
     
@@ -146,10 +161,10 @@ class CircularControl(tk.Canvas):
         callback : function
             Function to call when value changes
         """
-        # Calculate dimensions
-        self.radius = radius
-        self.width = radius * 2 + 20
-        self.height = radius * 2 + 40  # Extra space for label
+        # Calculate dimensions (scaled)
+        self.radius = S(radius)
+        self.width = self.radius * 2 + S(20)
+        self.height = self.radius * 2 + S(40)  # Extra space for label
         
         # Get parent background color if not specified
         if 'bg' not in kwargs:
@@ -187,10 +202,10 @@ class CircularControl(tk.Canvas):
         
         # Calculate center point
         cx = self.width // 2
-        cy = (self.height - 20) // 2  # Adjust for label space
-        
+        cy = (self.height - S(20)) // 2  # Adjust for label space
+
         # Draw track circle with better contrast
-        thickness = self.radius * 0.15
+        thickness = max(1, int(round(self.radius * 0.15)))
         track_radius = self.radius - thickness // 2
         self.create_oval(
             cx - track_radius, cy - track_radius,
@@ -216,15 +231,15 @@ class CircularControl(tk.Canvas):
         
         # Draw value text
         self.create_text(
-            cx, cy, text=f"{int(value)}%", 
-            fill=self.text_color, font=("Segoe UI", 12, "bold"),
+            cx, cy, text=f"{int(value)}%",
+            fill=self.text_color, font=("Segoe UI", F(12), "bold"),
             tags="value"
         )
         
         # Draw label
         self.create_text(
-            cx, self.height - 15, text=self.label,
-            fill=self.text_color, font=("Segoe UI", 9),
+            cx, self.height - S(15), text=self.label,
+            fill=self.text_color, font=("Segoe UI", F(9)),
             tags="label"
         )
     
@@ -244,7 +259,7 @@ class CircularControl(tk.Canvas):
         """Update value based on mouse position"""
         # Calculate center point
         cx = self.width // 2
-        cy = (self.height - 20) // 2
+        cy = (self.height - S(20)) // 2
         
         # Calculate angle from center to mouse position
         dx = event.x - cx
@@ -285,9 +300,9 @@ class FuturisticStyle:
         
         # Configure common elements
         style.configure("TFrame", background=COLORS["bg_dark"])
-        style.configure("TLabel", background=COLORS["bg_dark"], foreground=COLORS["text"], font=("Segoe UI", 9))
-        style.configure("TButton", background=COLORS["bg_light"], foreground=COLORS["text"], 
-                        font=("Segoe UI", 9, "bold"), borderwidth=0)
+        style.configure("TLabel", background=COLORS["bg_dark"], foreground=COLORS["text"], font=("Segoe UI", F(9)))
+        style.configure("TButton", background=COLORS["bg_light"], foreground=COLORS["text"],
+                        font=("Segoe UI", F(9), "bold"), borderwidth=0)
         style.map("TButton", background=[("active", COLORS["accent"])])
         
         # Style for panels
@@ -295,10 +310,10 @@ class FuturisticStyle:
         style.configure("Panel.TLabel", background=COLORS["bg_medium"], foreground=COLORS["text"])
         
         # Special styles
-        style.configure("Title.TLabel",    font=("Segoe UI", TITLE_FONT_SIZE, "bold"),    foreground=COLORS["text"], background=COLORS["bg_dark"])
-        style.configure("Subtitle.TLabel", font=("Segoe UI", SUBTITLE_FONT_SIZE, "bold"), foreground=COLORS["text"], background=COLORS["bg_medium"])
-        style.configure("Section.TLabel",  font=("Segoe UI", SECTION_FONT_SIZE, "bold"),  foreground=COLORS["text"], background=COLORS["bg_medium"])
-        style.configure("Value.TLabel",    font=("Segoe UI", VALUE_FONT_SIZE, "bold"),    foreground=COLORS["text"], background=COLORS["bg_medium"])
+        style.configure("Title.TLabel",    font=("Segoe UI", F(TITLE_FONT_SIZE), "bold"),    foreground=COLORS["text"], background=COLORS["bg_dark"])
+        style.configure("Subtitle.TLabel", font=("Segoe UI", F(SUBTITLE_FONT_SIZE), "bold"), foreground=COLORS["text"], background=COLORS["bg_medium"])
+        style.configure("Section.TLabel",  font=("Segoe UI", F(SECTION_FONT_SIZE), "bold"),  foreground=COLORS["text"], background=COLORS["bg_medium"])
+        style.configure("Value.TLabel",    font=("Segoe UI", F(VALUE_FONT_SIZE), "bold"),    foreground=COLORS["text"], background=COLORS["bg_medium"])
         style.configure("Accent.TLabel", foreground=COLORS["accent"], background=COLORS["bg_medium"])
         
         # Configure checkbox
@@ -307,7 +322,7 @@ class FuturisticStyle:
         # Configure notebook (tabs)
         style.configure("TNotebook", background=COLORS["bg_dark"], borderwidth=0)
         style.configure("TNotebook.Tab", background=COLORS["bg_medium"], foreground=COLORS["text"],
-                       padding=[10, 5], font=("Segoe UI", 9))
+                       padding=[S(10), S(5)], font=("Segoe UI", F(9)))
         style.map("TNotebook.Tab", background=[("selected", COLORS["bg_light"])], 
                  foreground=[("selected", COLORS["text"])])
         
@@ -319,7 +334,7 @@ class FuturisticStyle:
             "Accent.TButton",
             background=COLORS["bg_light"],
             foreground=COLORS["text"],
-            font=("Segoe UI", 9, "bold"),
+            font=("Segoe UI", F(9), "bold"),
             borderwidth=0,
         )
         style.map(
@@ -330,21 +345,21 @@ class FuturisticStyle:
         
         # Style for LabelFrame
         style.configure("TLabelframe", background=COLORS["bg_medium"], foreground=COLORS["text"])
-        style.configure("TLabelframe.Label", background=COLORS["bg_medium"], foreground=COLORS["text"], 
-                      font=("Segoe UI", 10, "bold"))
+        style.configure("TLabelframe.Label", background=COLORS["bg_medium"], foreground=COLORS["text"],
+                      font=("Segoe UI", F(10), "bold"))
 
         style.configure("Futuristic.Horizontal.TScale",
             background=COLORS["bg_medium"],
             troughcolor=COLORS["bg_light"],
-            sliderthickness=18,
-            sliderlength=28
+            sliderthickness=S(18),
+            sliderlength=S(28)
         )
         #“Save / Clear”的深色按钮
         style.configure(
            "CyberDark.TButton",
            background=COLORS["bg_light"],     # 深灰蓝
            foreground=COLORS["text"],         # 亮字
-           font=("Segoe UI", 9, "bold"),
+           font=("Segoe UI", F(9), "bold"),
            borderwidth=0,
            relief="flat",
         )
@@ -370,13 +385,15 @@ class FuturisticChart(tk.Canvas):
     
     def __init__(self, parent, width=400, height=200, bg=COLORS["chart_bg"]):
         """Initialize the chart"""
-        super().__init__(parent, width=width, height=height, bg=bg, 
+        width = S(width)
+        height = S(height)
+        super().__init__(parent, width=width, height=height, bg=bg,
                         highlightthickness=0, bd=0)
-        
+
         self.width = width
         self.height = height
-        self.margin_left, self.margin_right = MARGIN_LEFT, MARGIN_RIGHT
-        self.margin_top,  self.margin_bottom = MARGIN_TOP, MARGIN_BOTTOM
+        self.margin_left, self.margin_right = S(MARGIN_LEFT), S(MARGIN_RIGHT)
+        self.margin_top,  self.margin_bottom = S(MARGIN_TOP), S(MARGIN_BOTTOM)
         self.chart_width = width - self.margin_left - self.margin_right
         self.chart_height = height - self.margin_top - self.margin_bottom
         
@@ -391,7 +408,7 @@ class FuturisticChart(tk.Canvas):
             self.create_line(
                 self.margin_left, y, 
                 self.margin_left + self.chart_width, y,
-                fill=COLORS["bg_light"], width=1, dash=(2, 4), tags="grid"
+                fill=COLORS["bg_light"], width=max(1, S(1)), dash=(max(1, S(2)), max(1, S(4))), tags="grid"
             )
         
         # Draw vertical grid lines
@@ -400,20 +417,20 @@ class FuturisticChart(tk.Canvas):
             self.create_line(
                 x, self.margin_top,
                 x, self.margin_top + self.chart_height,
-                fill=COLORS["bg_light"], width=1, dash=(2, 4), tags="grid"
+                fill=COLORS["bg_light"], width=max(1, S(1)), dash=(max(1, S(2)), max(1, S(4))), tags="grid"
             )
             
         # Draw axis lines
         self.create_line(
             self.margin_left, self.margin_top + self.chart_height,
             self.margin_left + self.chart_width, self.margin_top + self.chart_height,
-            fill=COLORS["text_secondary"], width=2, tags="axis"
+            fill=COLORS["text_secondary"], width=max(1, S(2)), tags="axis"
         )
         
         self.create_line(
             self.margin_left, self.margin_top,
             self.margin_left, self.margin_top + self.chart_height,
-            fill=COLORS["text_secondary"], width=2, tags="axis"
+            fill=COLORS["text_secondary"], width=max(1, S(2)), tags="axis"
         )
 
 class ComparisonChart(FuturisticChart):
@@ -458,8 +475,8 @@ class ComparisonChart(FuturisticChart):
         for i, category in enumerate(categories):
             # Calculate x positions
             x_center = self.margin_left + (i + 1) * group_width
-            x_baseline = x_center - bar_width/2 - 5
-            x_current = x_center + bar_width/2 + 5
+            x_baseline = x_center - bar_width/2 - S(5)
+            x_current = x_center + bar_width/2 + S(5)
             
             # Calculate bar heights
             baseline_height = (baseline_values[i] / max_value) * self.chart_height
@@ -487,7 +504,7 @@ class ComparisonChart(FuturisticChart):
                 self.create_line(
                     x_baseline - bar_width/2, y_pos,
                     x_baseline + bar_width/2, y_pos,
-                    fill=self.baseline_color, width=1,
+                    fill=self.baseline_color, width=max(1, S(1)),
                     tags="bar", stipple=""
                 )
             
@@ -507,7 +524,7 @@ class ComparisonChart(FuturisticChart):
                 self.create_line(
                     x_current - bar_width/2, y_pos,
                     x_current + bar_width/2, y_pos,
-                    fill=self.current_color, width=1,
+                    fill=self.current_color, width=max(1, S(1)),
                     tags="bar", stipple=""
                 )
             
@@ -516,33 +533,33 @@ class ComparisonChart(FuturisticChart):
             self.create_text(
                 x_center, self.height - self.margin_bottom/2,
                 text=f"{category}{unit_text}", anchor="center", tags="label",
-                fill=COLORS["text"], font=("Segoe UI", 9)
+                fill=COLORS["text"], font=("Segoe UI", F(9))
             )
             
             # Draw baseline value
             self.create_text(
-                x_baseline, y_baseline_top - 5,
+                x_baseline, y_baseline_top - S(5),
                 text=f"{baseline_values[i]:.1f}", anchor="s",
-                font=("Segoe UI", 8), tags="value", fill=COLORS["text_secondary"]
+                font=("Segoe UI", F(8)), tags="value", fill=COLORS["text_secondary"]
             )
             
             # Draw current value
             self.create_text(
-                x_current, y_current_top - 5,
+                x_current, y_current_top - S(5),
                 text=f"{current_values[i]:.1f}", anchor="s",
-                font=("Segoe UI", 8), tags="value", fill=COLORS["text"]
+                font=("Segoe UI", F(8)), tags="value", fill=COLORS["text"]
             )
         
         # Draw scale on y-axis
         self.create_text(
-            self.margin_left - 5, self.margin_top,
+            self.margin_left - S(5), self.margin_top,
             text=f"{max_value:.1f}", anchor="e", tags="value",
-            fill=COLORS["text_secondary"], font=("Segoe UI", 8)
+            fill=COLORS["text_secondary"], font=("Segoe UI", F(8))
         )
         self.create_text(
-            self.margin_left - 5, self.height - self.margin_bottom,
+            self.margin_left - S(5), self.height - self.margin_bottom,
             text="0", anchor="e", tags="value",
-            fill=COLORS["text_secondary"], font=("Segoe UI", 8)
+            fill=COLORS["text_secondary"], font=("Segoe UI", F(8))
         )
 
         self.draw_legend()
@@ -554,9 +571,9 @@ class ComparisonChart(FuturisticChart):
             ("Current", self.current_color),
         ]
 
-        spacing = LEGEND_SPACING
-        box_size = LEGEND_BOX
-        legend_x = self.width - self.margin_right - 80
+        spacing = max(1, S(LEGEND_SPACING))
+        box_size = max(1, S(LEGEND_BOX))
+        legend_x = self.width - self.margin_right - S(80)
         legend_y = self.margin_top
 
         for i, (label, color) in enumerate(items):
@@ -567,9 +584,9 @@ class ComparisonChart(FuturisticChart):
                 fill=color, outline="", tags="legend"
             )
             self.create_text(
-                legend_x + box_size + 5, y + box_size / 2,
+                legend_x + box_size + S(5), y + box_size / 2,
                 text=label, anchor="w", fill=COLORS["text"],
-                tags="legend", font=("Segoe UI", 8)
+                tags="legend", font=("Segoe UI", F(8))
             )
 
 class RecordBarChart(FuturisticChart):
@@ -579,8 +596,8 @@ class RecordBarChart(FuturisticChart):
         """Initialize the chart"""
         super().__init__(parent, width, height)
 
-        if self.margin_bottom < 32:
-            self.margin_bottom = 32
+        if self.margin_bottom < S(32):
+            self.margin_bottom = S(32)
             self.chart_height = self.height - self.margin_top - self.margin_bottom
             self.delete("grid", "axis")
             self.draw_grid()
@@ -642,27 +659,27 @@ class RecordBarChart(FuturisticChart):
                     fill=self.colors[key], outline="", tags="bar"
                 )
                 self.create_text(
-                    (x0 + x1) / 2, y0 - 5,
+                    (x0 + x1) / 2, y0 - S(5),
                     text=f"{value:.1f}", anchor="s",
-                    font=("Segoe UI", 8), tags="value", fill=COLORS["text"]
+                    font=("Segoe UI", F(8)), tags="value", fill=COLORS["text"]
                 )
 
             self.create_text(
-                x_center, self.height - self.margin_bottom + 10,
+                x_center, self.height - self.margin_bottom + S(10),
                 text=record["label"], anchor="n", tags="label",
-                fill=COLORS["text_secondary"]
+                fill=COLORS["text_secondary"], font=("Segoe UI", F(9))
             )
 
         # Draw scale on y-axis
         self.create_text(
-            self.margin_left - 5, self.margin_top,
+            self.margin_left - S(5), self.margin_top,
             text=f"{max_value:.1f}", anchor="e", tags="value",
-            fill=COLORS["text_secondary"], font=("Segoe UI", 8)
+            fill=COLORS["text_secondary"], font=("Segoe UI", F(8))
         )
         self.create_text(
-            self.margin_left - 5, self.height - self.margin_bottom,
+            self.margin_left - S(5), self.height - self.margin_bottom,
             text="0", anchor="e", tags="value",
-            fill=COLORS["text_secondary"], font=("Segoe UI", 8)
+            fill=COLORS["text_secondary"], font=("Segoe UI", F(8))
         )
 
         self.draw_legend()
@@ -677,9 +694,9 @@ class RecordBarChart(FuturisticChart):
             ("Plastic (kg)", "plastic"),
         ]
 
-        spacing = LEGEND_SPACING
-        box_size = LEGEND_BOX
-        legend_x = self.width - self.margin_right - 100
+        spacing = max(1, S(LEGEND_SPACING))
+        box_size = max(1, S(LEGEND_BOX))
+        legend_x = self.width - self.margin_right - S(100)
         legend_y = self.margin_top
 
         for i, (label, key) in enumerate(items):
@@ -690,16 +707,16 @@ class RecordBarChart(FuturisticChart):
                 fill=self.colors[key], outline="", tags="legend"
             )
             self.create_text(
-                legend_x + box_size + 5, y + box_size // 2,
+                legend_x + box_size + S(5), y + box_size // 2,
                 text=label, anchor="w", tags="legend",
-                fill=COLORS["text"]
+                fill=COLORS["text"], font=("Segoe UI", F(8))
             )
 
 class CircularEconomyDashboard:
     def __init__(self, root):
         self.root = root
         self.root.title("Circular Economy Dashboard")
-        self.root.geometry("1200x800")
+        self.root.geometry(f"{S(BASE_W)}x{S(BASE_H)}")
         self.root.configure(bg=COLORS["bg_dark"])
         
         # Apply futuristic styling
@@ -707,11 +724,11 @@ class CircularEconomyDashboard:
         
         # Create main container
         main_container = ttk.Frame(root)
-        main_container.pack(fill="both", expand=True, padx=10, pady=10)
+        main_container.pack(fill="both", expand=True, padx=S(10), pady=S(10))
         
         # Create top frame for header
         header_frame = ttk.Frame(main_container)
-        header_frame.pack(fill="x", pady=(0, 10))
+        header_frame.pack(fill="x", pady=(0, S(10)))
         
         ttk.Label(header_frame, text="Circular Economy Dashboard", style="Title.TLabel").pack(side="left")
         
@@ -721,7 +738,7 @@ class CircularEconomyDashboard:
         
         # Left column for inputs
         self.input_column = ttk.Frame(content_frame)
-        self.input_column.pack(side="left", fill="both", padx=(0, 10))
+        self.input_column.pack(side="left", fill="both", padx=(0, S(10)))
         
         # Right column for visualizations
         self.viz_column = ttk.Frame(content_frame)
@@ -823,35 +840,43 @@ class CircularEconomyDashboard:
         """Create visualization panels for metrics and materials"""
         # Create metrics panel
         metrics_panel = ttk.LabelFrame(self.viz_column, text="Metrics Comparison", style="TLabelframe")
-        metrics_panel.pack(fill="x", expand=False, pady=(0, PAD_Y_PANEL))
+        metrics_panel.pack(anchor="n", pady=(0, S(PAD_Y_PANEL)), padx=(0, S(PAD_X)))
+
+        metrics_container = ttk.Frame(metrics_panel, width=S(550))
+        metrics_container.pack_propagate(False)
+        metrics_container.pack(anchor="n", padx=S(PAD_X), pady=(0, S(PAD_Y_SMALL)))
 
         # Create metrics chart
-        self.metrics_chart = ComparisonChart(metrics_panel, width=550, height=CHART_H_METRICS)
-        self.metrics_chart.pack(fill="x", expand=False, padx=PAD_X, pady=(0, PAD_Y_SMALL))
+        self.metrics_chart = ComparisonChart(metrics_container, width=550, height=CHART_H_METRICS)
+        self.metrics_chart.pack(anchor="n")
 
         # Create materials panel
         materials_panel = ttk.LabelFrame(self.viz_column, text="Materials Breakdown", style="TLabelframe")
-        materials_panel.pack(fill="x", expand=False, pady=(0, PAD_Y_PANEL))
+        materials_panel.pack(anchor="n", pady=(0, S(PAD_Y_PANEL)), padx=(0, S(PAD_X)))
+
+        materials_container = ttk.Frame(materials_panel, width=S(550))
+        materials_container.pack_propagate(False)
+        materials_container.pack(anchor="n", padx=S(PAD_X), pady=(0, S(PAD_Y_SMALL)))
 
         # Create materials chart
-        self.materials_chart = ComparisonChart(materials_panel, width=550, height=CHART_H_MATERIALS)
-        self.materials_chart.pack(fill="x", expand=False, padx=PAD_X, pady=(0, PAD_Y_SMALL))
+        self.materials_chart = ComparisonChart(materials_container, width=550, height=CHART_H_MATERIALS)
+        self.materials_chart.pack(anchor="n")
         
     def create_livegraph_panel(self):
         """Create panel for saving and comparing records"""
         # old version:  Live Metrics Visualization
         livegraph_panel = ttk.LabelFrame(self.viz_column, text="Scenario Comparison")
-        livegraph_panel.pack(fill="both", expand=False, pady=(0, PAD_Y_PANEL))
+        livegraph_panel.pack(anchor="n", pady=(0, S(PAD_Y_PANEL)), padx=(0, S(PAD_X)))
 
         control_frame = ttk.Frame(livegraph_panel)
-        control_frame.pack(side="top", fill="x", padx=PAD_X, pady=(0, PAD_Y_SMALL))
+        control_frame.pack(side="top", fill="x", padx=S(PAD_X), pady=(0, S(PAD_Y_SMALL)))
 
         ttk.Button(
             control_frame,
             text="Save Record",
             command=self.save_record,
             style="CyberDark.TButton",
-        ).pack(side="left", padx=(0, PAD_X))
+        ).pack(side="left", padx=(0, S(PAD_X)))
 
         ttk.Button(
             control_frame,
@@ -860,17 +885,19 @@ class CircularEconomyDashboard:
             style="CyberDark.TButton",
         ).pack(side="left")
 
+        chart_container = ttk.Frame(livegraph_panel, width=S(CHART_W_SCENARIO))
+        chart_container.pack_propagate(False)
+        chart_container.pack(side="top", anchor="n", padx=S(PAD_X), pady=(0, S(PAD_Y_PANEL)))
+
         self.records_chart = RecordBarChart(
-            livegraph_panel, width=CHART_W_SCENARIO, height=CHART_H_SCENARIO, max_records=3
+            chart_container, width=CHART_W_SCENARIO, height=CHART_H_SCENARIO, max_records=3
         )
-        self.records_chart.pack(
-            side="top", fill="x", expand=False, padx=PAD_X, pady=(0, PAD_Y_PANEL)
-        )
+        self.records_chart.pack(anchor="n")
     
     def create_calculation_tabs(self):
         """Create tabs for calculation details and info"""
         notebook_frame = ttk.Frame(self.root)
-        notebook_frame.pack(fill="x", padx=10, pady=(0, 10))
+        notebook_frame.pack(fill="x", padx=S(10), pady=(0, S(10)))
         
         notebook = ttk.Notebook(notebook_frame)
         notebook.pack(fill="x")
@@ -897,10 +924,10 @@ class CircularEconomyDashboard:
             self.input_panel,
             text="整表复用率（QM 判定）",
             style="Section.TLabel"
-        ).pack(pady=(10, 5))
+        ).pack(pady=(S(10), S(5)))
 
         meter_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
-        meter_frame.pack(fill="x", pady=5, padx=10)
+        meter_frame.pack(fill="x", pady=S(5), padx=S(10))
 
         CircularControl(
             meter_frame,
@@ -908,14 +935,14 @@ class CircularEconomyDashboard:
             label="Meter",
             radius=GAUGE_RADIUS,
             callback=self.calculate_and_update,
-        ).pack(side="left", padx=10)
+        ).pack(side="left", padx=S(10))
 
         # Remanufacturing controls
         ttk.Label(self.input_panel, text="组件再制造",
-                 style="Section.TLabel").pack(pady=(15, 5))
+                 style="Section.TLabel").pack(pady=(S(15), S(5)))
 
         reman_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
-        reman_frame.pack(fill="x", pady=5, padx=10)
+        reman_frame.pack(fill="x", pady=S(5), padx=S(10))
 
         CircularControl(
             reman_frame,
@@ -923,7 +950,7 @@ class CircularEconomyDashboard:
             label="Impeller",
             radius=GAUGE_RADIUS,
             callback=self.calculate_and_update
-        ).pack(side="left", padx=10)
+        ).pack(side="left", padx=S(10))
 
         CircularControl(
             reman_frame,
@@ -931,14 +958,14 @@ class CircularEconomyDashboard:
             label="Housing",
             radius=GAUGE_RADIUS,
             callback=self.calculate_and_update
-        ).pack(side="left", padx=10)
+        ).pack(side="left", padx=S(10))
 
         # Recycling controls
         ttk.Label(self.input_panel, text="Component Recycling",
-                 style="Section.TLabel").pack(pady=(15, 5))
+                 style="Section.TLabel").pack(pady=(S(15), S(5)))
 
         recycle_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
-        recycle_frame.pack(fill="x", pady=5, padx=10)
+        recycle_frame.pack(fill="x", pady=S(5), padx=S(10))
 
         recycle_impeller_control = CircularControl(
             recycle_frame,
@@ -947,7 +974,7 @@ class CircularEconomyDashboard:
             radius=GAUGE_RADIUS,
             callback=self.calculate_and_update
         )
-        recycle_impeller_control.pack(side="left", padx=10)
+        recycle_impeller_control.pack(side="left", padx=S(10))
 
         recycle_housing_control = CircularControl(
             recycle_frame,
@@ -956,17 +983,17 @@ class CircularEconomyDashboard:
             radius=GAUGE_RADIUS,
             callback=self.calculate_and_update
         )
-        recycle_housing_control.pack(side="left", padx=10)
+        recycle_housing_control.pack(side="left", padx=S(10))
         
         # Energy mix inputs
         ttk.Label(self.input_panel, text="能源构成", style="Section.TLabel").pack(
-            pady=(20, 10), anchor="w", padx=10)
+            pady=(S(20), S(10)), anchor="w", padx=S(10))
 
         mix_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
-        mix_frame.pack(fill="x", padx=10, pady=5)
+        mix_frame.pack(fill="x", padx=S(10), pady=S(5))
         # ——— 电价面板 ———
         price_frame = ttk.Frame(mix_frame, style="Panel.TFrame")
-        price_frame.pack(fill="x", pady=5)
+        price_frame.pack(fill="x", pady=S(5))
 
         ttk.Checkbutton(
             price_frame,
@@ -980,7 +1007,7 @@ class CircularEconomyDashboard:
             textvariable=self.realtime_price,
             width=6
         )
-        self.realtime_price_entry.pack(side="left", padx=(10,2))
+        self.realtime_price_entry.pack(side="left", padx=(S(10), S(2)))
         ttk.Label(price_frame, text="€/kWh", style="Panel.TLabel").pack(side="left")
 
         # 默认禁用，只有勾选"使用实时电价"才可编辑
@@ -988,70 +1015,70 @@ class CircularEconomyDashboard:
 
         # 太阳能
         solar_row = ttk.Frame(mix_frame, style="Panel.TFrame")
-        solar_row.pack(fill="x", pady=2)
+        solar_row.pack(fill="x", pady=S(2))
         ttk.Label(solar_row, text="阳Solar (%)", style="Value.TLabel", width=10).pack(side="left")
         solar_scale = ttk.Scale(solar_row, from_=0, to=100, orient="horizontal",
             variable=self.solar_pct, command=lambda v: self.on_slider_change('solar', float(v)),
             style="Futuristic.Horizontal.TScale")
-        solar_scale.pack(side="left", fill="x", expand=True, padx=5)
+        solar_scale.pack(side="left", fill="x", expand=True, padx=S(5))
         self.solar_val_label = ttk.Label(solar_row, text=f"{self.solar_pct.get():.0f}%", style="Value.TLabel", width=4)
         self.solar_val_label.pack(side="right")
 
         # 风能
         wind_row = ttk.Frame(mix_frame, style="Panel.TFrame")
-        wind_row.pack(fill="x", pady=2)
+        wind_row.pack(fill="x", pady=S(2))
         ttk.Label(wind_row, text="风Wind (%)", style="Value.TLabel", width=10).pack(side="left")
         wind_scale = ttk.Scale(wind_row, from_=0, to=100, orient="horizontal",
             variable=self.wind_pct, command=lambda v: self.on_slider_change('wind', float(v)),
             style="Futuristic.Horizontal.TScale")
-        wind_scale.pack(side="left", fill="x", expand=True, padx=5)
+        wind_scale.pack(side="left", fill="x", expand=True, padx=S(5))
         self.wind_val_label = ttk.Label(wind_row, text=f"{self.wind_pct.get():.0f}%", style="Value.TLabel", width=4)
         self.wind_val_label.pack(side="right")
 
         # 化石能源
         fossil_row = ttk.Frame(mix_frame, style="Panel.TFrame")
-        fossil_row.pack(fill="x", pady=2)
+        fossil_row.pack(fill="x", pady=S(2))
         ttk.Label(fossil_row, text="化Fossil (%)", style="Value.TLabel", width=10).pack(side="left")
         fossil_scale = ttk.Scale(fossil_row, from_=0, to=100, orient="horizontal",
             variable=self.fossil_pct, command=lambda v: self.on_slider_change('fossil', float(v)),
             style="Futuristic.Horizontal.TScale")
-        fossil_scale.pack(side="left", fill="x", expand=True, padx=5)
+        fossil_scale.pack(side="left", fill="x", expand=True, padx=S(5))
         self.fossil_val_label = ttk.Label(fossil_row, text=f"{self.fossil_pct.get():.0f}%", style="Value.TLabel", width=4)
         self.fossil_val_label.pack(side="right")
 
         # 其他
         rest_row = ttk.Frame(mix_frame, style="Panel.TFrame")
-        rest_row.pack(fill="x", pady=2)
+        rest_row.pack(fill="x", pady=S(2))
         ttk.Label(rest_row, text="其Rest (%)", style="Value.TLabel", width=10).pack(side="left")
         rest_scale = ttk.Scale(rest_row, from_=0, to=100, orient="horizontal",
             variable=self.rest_pct, command=lambda v: self.on_slider_change('rest', float(v)),
             style="Futuristic.Horizontal.TScale")
-        rest_scale.pack(side="left", fill="x", expand=True, padx=5)
+        rest_scale.pack(side="left", fill="x", expand=True, padx=S(5))
         self.rest_val_label = ttk.Label(rest_row, text=f"{self.rest_pct.get():.0f}%", style="Value.TLabel", width=4)
         self.rest_val_label.pack(side="right")
 
         # 总和校验
         self.energy_sum_label = ttk.Label(mix_frame, text="合计: 100%", style="Value.TLabel")
-        self.energy_sum_label.pack(pady=(5, 0))
+        self.energy_sum_label.pack(pady=(S(5), 0))
         
         # Current energy mix display - 使用 StringVar 动态更新
         mix_display_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
-        mix_display_frame.pack(fill="x", padx=10, pady=(0, 10))
+        mix_display_frame.pack(fill="x", padx=S(10), pady=(0, S(10)))
         
         # 创建动态更新的 StringVar
         self.energy_mix_display = tk.StringVar()
         self.price_display = tk.StringVar()
         
-        ttk.Label(mix_display_frame, text="当前能源构成:", style="Panel.TLabel").pack(side="left", padx=10)
-        ttk.Label(mix_display_frame, textvariable=self.energy_mix_display, style="Value.TLabel").pack(side="left", padx=5)
-        ttk.Label(mix_display_frame, textvariable=self.price_display, style="Value.TLabel").pack(side="left", padx=5)
+        ttk.Label(mix_display_frame, text="当前能源构成:", style="Panel.TLabel").pack(side="left", padx=S(10))
+        ttk.Label(mix_display_frame, textvariable=self.energy_mix_display, style="Value.TLabel").pack(side="left", padx=S(5))
+        ttk.Label(mix_display_frame, textvariable=self.price_display, style="Value.TLabel").pack(side="left", padx=S(5))
         
         
     def create_calc_tab_content(self, parent):
         """Create the calculations tab content"""
         # Create a scrollable text area
         calc_frame = ttk.Frame(parent, style="TFrame")
-        calc_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        calc_frame.pack(fill="both", expand=True, padx=S(10), pady=S(5))
         
         # Add a scrollbar
         scrollbar = ttk.Scrollbar(calc_frame)
@@ -1059,7 +1086,8 @@ class CircularEconomyDashboard:
         
         # Create a text widget with scrollbar
         calc_text = tk.Text(calc_frame, wrap="word", yscrollcommand=scrollbar.set, height=8,
-                           bg=COLORS["bg_medium"], fg=COLORS["text"], bd=0, highlightthickness=0)
+                           bg=COLORS["bg_medium"], fg=COLORS["text"], bd=0, highlightthickness=0,
+                           font=("Segoe UI", F(10)))
         calc_text.pack(side="left", fill="both", expand=True)
         scrollbar.config(command=calc_text.yview)
         
@@ -1106,8 +1134,8 @@ class CircularEconomyDashboard:
         )
         
         # Configure tags for styling
-        calc_text.tag_configure("heading", font=("Segoe UI", 12, "bold"), foreground=COLORS["accent"])
-        calc_text.tag_configure("subheading", font=("Segoe UI", 10, "bold"), foreground=COLORS["text"])
+        calc_text.tag_configure("heading", font=("Segoe UI", F(12), "bold"), foreground=COLORS["accent"])
+        calc_text.tag_configure("subheading", font=("Segoe UI", F(10), "bold"), foreground=COLORS["text"])
         
         # Make the text widget read-only
         calc_text.config(state="disabled")
@@ -1115,7 +1143,7 @@ class CircularEconomyDashboard:
     def create_info_tab_content(self, parent):
         """Create the info tab content"""
         info_frame = ttk.Frame(parent, style="TFrame")
-        info_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        info_frame.pack(fill="both", expand=True, padx=S(10), pady=S(5))
         
         info_text = """
 Circular Economy Dashboard
@@ -1150,9 +1178,10 @@ The Scenario Comparison panel lets you save up to three records and compare thei
 """
         
         # Create a text widget for the info content
-        info_text_widget = tk.Text(info_frame, wrap="word", height=15, 
-                                  bg=COLORS["bg_medium"], fg=COLORS["text"], 
-                                  bd=0, highlightthickness=0)
+        info_text_widget = tk.Text(info_frame, wrap="word", height=15,
+                                  bg=COLORS["bg_medium"], fg=COLORS["text"],
+                                  bd=0, highlightthickness=0,
+                                  font=("Segoe UI", F(10)))
         info_text_widget.pack(fill="both", expand=True)
         info_text_widget.insert("1.0", info_text)
         info_text_widget.config(state="disabled")  # Make read-only
@@ -1733,7 +1762,19 @@ The Scenario Comparison panel lets you save up to three records and compare thei
 
 # Create the main window and dashboard application
 def main():
+    global SCALE
+
     root = tk.Tk()
+
+    screen_w = root.winfo_screenwidth()
+    screen_h = root.winfo_screenheight()
+    SCALE = min(screen_w / BASE_W, screen_h / BASE_H, 1.0)
+    root._SCALE = SCALE
+    try:
+        root.tk.call('tk', 'scaling', SCALE)
+    except tk.TclError:
+        pass
+
     app = CircularEconomyDashboard(root)
     root.mainloop()
 
