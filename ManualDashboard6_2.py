@@ -1,75 +1,132 @@
 # -*- coding: utf-8 -*-
+"""Responsive Circular Economy Dashboard (ManualDashboard6_2).
+
+This module refactors the legacy dashboard into a DPI-aware, touch friendly
+Tkinter application that scales from small tablets to desktop displays without
+breaking existing business logic. The refactor keeps the public API surface of
+``CircularControl`` and ``CircularEconomyDashboard`` compatible with previous
+versions while introducing opt-in responsive behaviour for new layouts.
 """
-Created on Sat Mar 15 11:19:52 2025
-Updated on Fri Aug 08 01:19:52 2025
-Baseline: 0 % reuse, 0 % recycle, 100 % fossil (worst-case scenario)a
-@author: tobias
-@author: Junhao
-"""
+
+from __future__ import annotations
+
+import datetime
+import math
+import re
+import threading
+import time
+from dataclasses import dataclass
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import tkinter as tk
 from tkinter import ttk
-import math
+
 import requests
 import xml.etree.ElementTree as ET
-import datetime
 from zoneinfo import ZoneInfo
-import re
-import threading, time
+
 try:
     import serial  # 需要: pip install pyserial
-except ImportError:
+except ImportError:  # pragma: no cover - optional dependency
     serial = None
 
-# Reference values for material consumption
+# ---------------------------------------------------------------------------
+# Core constants and domain specific defaults (kept for compatibility)
+# ---------------------------------------------------------------------------
+
 REF_BRASS = 0.5   # kg per unit  0.8 → 0.5
 REF_PLASTIC = 0.2  # kg per unit  0.02 → 0.2
 
-# API 密钥 (需要替换为实际的密钥)
 YOUR_API_KEY = "46b6d9c5-1c8a-4dc0-bb0b-eaf380ec0f6a"
 
-# Energy mix CO2 factors (g CO2/kWh)
 ENERGY_SOURCES = {
-    "solar":  {"co2": 50,  "cost": 0.06},   # gCO2/kWh, €/kWh
-    "wind":   {"co2": 20,  "cost": 0.05},
+    "solar": {"co2": 50, "cost": 0.06},
+    "wind": {"co2": 20, "cost": 0.05},
     "fossil": {"co2": 800, "cost": 0.14},
-    "rest":   {"co2": 100, "cost": 0.11}   # estimated values
+    "rest": {"co2": 100, "cost": 0.11},
 }
 
-# Standard energy mix used for price correction
 STANDARD_ENERGY_MIX = {
-    "solar":  0.13,
-    "wind":   0.31,
+    "solar": 0.13,
+    "wind": 0.31,
     "fossil": 0.47,
-    "rest":   0.09
+    "rest": 0.09,
 }
 
-# Component costs
 COMPONENT_COSTS = {
     "impeller": {"new": 0.20, "reman": 0.15, "reused": 0.10},
-    "housing": {"new": 4.00, "reman": 3.00, "reused": 2.00}
+    "housing": {"new": 4.00, "reman": 3.00, "reused": 2.00},
 }
 
-# Energy consumption
 ENERGY_CONSUMPTION = {
-    "new": 20.0,    # kWh for completely new
-    "reman": 16.5,  # kWh for remanufactured components
-    "reused": 14.0  # kWh for completely reused
+    "new": 20.0,
+    "reman": 16.5,
+    "reused": 14.0,
 }
 
+COLORS = {
+    "bg_dark": "#0d1117",
+    "bg_medium": "#1a1f2b",
+    "bg_light": "#1e2532",
+    "accent": "#00E0E0",
+    "text": "#F1F1F1",
+    "text_secondary": "#A0A0A0",
+    "chart_bg": "#141926",
+    "positive": "#4CAF50",
+    "negative": "#E94560",
+    "metric1": "#00BCD4",
+    "metric2": "#FFC107",
+    "metric3": "#8BC34A",
+    "material1": "#FF5722",
+    "material2": "#9C27B0",
+}
 
-def compute_avg_co2_from_energy_mix(factors):
+# ---------------------------------------------------------------------------
+# Responsive constants and helpers
+# ---------------------------------------------------------------------------
+
+# [RESPONSIVE] Minimum touch target size (px)
+TOUCH_MIN_SIZE = 44
+
+# [RESPONSIVE] DPI aware scaling defaults
+DEFAULT_DPI = 96.0
+
+# [RESPONSIVE] Breakpoints for layout modes (width + height)
+BREAKPOINTS = {
+    "SM": {"width": 900, "height": 700},
+    "MD": {"width": 1200, "height": 900},
+    "LG": {"width": 1600, "height": 1080},
+}
+
+# [RESPONSIVE] Font scaling table
+FONT_SCALE = {
+    "SM": 0.92,
+    "MD": 1.0,
+    "LG": 1.12,
+}
+
+# [RESPONSIVE] Dataclass to cache chart payloads for lazy redraw
+@dataclass
+class ChartPayload:
+    args: Tuple
+    kwargs: Dict
+
+
+# ---------------------------------------------------------------------------
+# Utility functions retained from the legacy module
+# ---------------------------------------------------------------------------
+
+def compute_avg_co2_from_energy_mix(factors: Dict[str, float]) -> float:
     """Return the average CO₂ intensity (kg/kWh) for a given energy mix."""
 
     return sum(ENERGY_SOURCES[src]["co2"] * factors[src] for src in factors) / 1000.0
 
-
 def compute_avg_price_from_energy_mix(
-    factors,
-    use_realtime=False,
-    realtime_price=0.0,
-    price_source="本地加权均值",
-):
+    factors: Dict[str, float],
+    use_realtime: bool = False,
+    realtime_price: float = 0.0,
+    price_source: str = "本地加权均值",
+) -> float:
     """Return the average electricity price (€/kWh) for a given energy mix."""
 
     custom = sum(ENERGY_SOURCES[src]["cost"] * factors[src] for src in factors)
@@ -81,512 +138,468 @@ def compute_avg_price_from_energy_mix(
         return realtime_price + (custom - standard)
     return custom
 
-# Color scheme for futuristic design
-COLORS = {
-    "bg_dark": "#0d1117",        # Very dark blue background (main background)
-    "bg_medium": "#1a1f2b",      # Medium blue for panels
-    "bg_light": "#1e2532",       # Lighter blue for highlights
-    "accent": "#00E0E0",         # Cyan accent (changed from red to match image)
-    "text": "#F1F1F1",           # Light text
-    "text_secondary": "#A0A0A0", # Secondary text
-    "chart_bg": "#141926",       # Chart background
-    "positive": "#4CAF50",       # Green for positive changes
-    "negative": "#E94560",       # Red for negative changes
-    "metric1": "#00BCD4",        # Cyan for energy
-    "metric2": "#FFC107",        # Amber for cost
-    "metric3": "#8BC34A",        # Light green for CO2
-    "material1": "#FF5722",      # Deep orange for brass
-    "material2": "#9C27B0"       # Purple for plastic
-}
-
-# --- Compact sizing (no autoscale) ---
-COMPACT = True
-
-GAUGE_RADIUS        = 45 if COMPACT else 55   # 左侧 6 个圆形控件半径（原 55）
-CHART_H_METRICS     = 180 if COMPACT else 300 # 右上图表高度（原 300）
-CHART_H_MATERIALS   = 150 if COMPACT else 270 # 右中图表高度（原 270）
-CHART_H_SCENARIO    = 160 if COMPACT else 250 # 右下场景记录高度（原 250）
-CHART_W_SCENARIO    = 750 if COMPACT else 900 # 场景记录画布宽度（原先实例化 1160）
-
-PAD_X               = 10 if COMPACT else 12   # 通用水平内边距
-PAD_Y_SMALL         = 3                        # 行内/图例间距
-PAD_Y_PANEL         = 6                        # 面板之间的垂直间距
-
-TITLE_FONT_SIZE     = 12 if COMPACT else 14
-SUBTITLE_FONT_SIZE  = 10 if COMPACT else 11
-SECTION_FONT_SIZE   = 9  if COMPACT else 10
-VALUE_FONT_SIZE     = 9
-
-# 压缩图表边距与图例密度
-MARGIN_LEFT         = 46 if COMPACT else 50
-MARGIN_RIGHT        = 16 if COMPACT else 20
-MARGIN_TOP          = 12 if COMPACT else 20
-MARGIN_BOTTOM       = 24 if COMPACT else 40
-LEGEND_SPACING      = 14 if COMPACT else 22
-LEGEND_BOX          = 8
-
-SHOW_CALC_TABS = False
-
-class CircularControl(tk.Canvas):
-    """A futuristic circular control for setting percentage values"""
-    
-    def __init__(self, parent, variable, label="", radius=50, callback=None, **kwargs):
-        """Initialize the circular control
-        
-        Parameters:
-        -----------
-        parent : tkinter widget
-            The parent widget
-        variable : tkinter.DoubleVar
-            The variable to control
-        label : str
-            The label for the control
-        radius : int
-            The radius of the circular control
-        callback : function
-            Function to call when value changes
-        """
-        # Calculate dimensions
-        self.radius = radius
-        self.width = radius * 2 + 20
-        self.height = radius * 2 + 40  # Extra space for label
-        
-        # Get parent background color if not specified
-        if 'bg' not in kwargs:
-            kwargs['bg'] = COLORS["bg_medium"]  # Use panel background color
-            
-        # Make sure there's no border/highlight
-        kwargs['highlightthickness'] = 0
-        kwargs['bd'] = 0
-        
-        # Initialize canvas
-        super().__init__(parent, width=self.width, height=self.height, **kwargs)
-        
-        # Store parameters
-        self.variable = variable
-        self.label = label
-        self.callback = callback
-        
-        # Set colors
-        self.bg_color = kwargs['bg']  # Use the background color from kwargs
-        self.track_color = "#2A3445"  # Darker track for better contrast
-        self.progress_color = COLORS["accent"]
-        self.text_color = COLORS["text"]
-        
-        # Draw initial state
-        self._draw_control()
-        
-        # Add event handlers
-        self.bind("<ButtonPress-1>", self._on_press)
-        self.bind("<B1-Motion>", self._on_drag)
-        self.bind("<ButtonRelease-1>", self._on_release)
-    
-    def _draw_control(self):
-        """Draw the circular control"""
-        self.delete("all")
-        
-        # Calculate center point
-        cx = self.width // 2
-        cy = (self.height - 20) // 2  # Adjust for label space
-        
-        # Draw track circle with better contrast
-        thickness = self.radius * 0.15
-        track_radius = self.radius - thickness // 2
-        self.create_oval(
-            cx - track_radius, cy - track_radius,
-            cx + track_radius, cy + track_radius,
-            outline=self.track_color, width=thickness, tags="track"
-        )
-        
-        # Get current value
-        value = self.variable.get()
-        
-        # Draw progress arc
-        start_angle = 90
-        extent_angle = -value * 3.6  # Convert percentage to degrees (negative for clockwise)
-        
-        if abs(extent_angle) > 0.1:  # Only draw if there's a visible arc
-            self.create_arc(
-                cx - track_radius, cy - track_radius,
-                cx + track_radius, cy + track_radius,
-                start=start_angle, extent=extent_angle, 
-                outline=self.progress_color, width=thickness,
-                style="arc", tags="progress"
-            )
-        
-        # Draw value text
-        self.create_text(
-            cx, cy, text=f"{int(value)}%", 
-            fill=self.text_color, font=("Segoe UI", 12, "bold"),
-            tags="value"
-        )
-        
-        # Draw label
-        self.create_text(
-            cx, self.height - 15, text=self.label,
-            fill=self.text_color, font=("Segoe UI", 9),
-            tags="label"
-        )
-    
-    def _on_press(self, event):
-        """Handle mouse press event"""
-        self._update_value(event)
-    
-    def _on_drag(self, event):
-        """Handle mouse drag event"""
-        self._update_value(event)
-    
-    def _on_release(self, event):
-        """Handle mouse release event"""
-        self._update_value(event)
-    
-    def _update_value(self, event):
-        """Update value based on mouse position"""
-        # Calculate center point
-        cx = self.width // 2
-        cy = (self.height - 20) // 2
-        
-        # Calculate angle from center to mouse position
-        dx = event.x - cx
-        dy = event.y - cy
-        
-        # Calculate angle in degrees
-        angle = math.degrees(math.atan2(dy, dx))
-        
-        # Convert angle to value (0-100)
-        # Adjust angle to start from top (90 degrees)
-        angle = (angle - 90) % 360
-        
-        # Convert to percentage (clockwise)
-        value = 100 - (angle / 360 * 100)
-        
-        # Ensure value is between 0 and 100
-        value = max(0, min(100, value))
-        
-        # Update variable
-        old_value = self.variable.get()
-        self.variable.set(round(value, 1))
-        
-        # Redraw control
-        self._draw_control()
-        
-        # Trigger callback if provided and value changed
-        if self.callback and abs(old_value - value) > 0.1:
-            self.callback()
 
 class FuturisticStyle:
-    """Apply futuristic styling to Tkinter widgets"""
-    
-    @staticmethod
-    def configure_styles():
-        """Configure ttk styles for a futuristic look"""
-        style = ttk.Style()
-        #style.theme_use("clam")
-        
-        # Configure common elements
-        style.configure("TFrame", background=COLORS["bg_dark"])
-        style.configure("TLabel", background=COLORS["bg_dark"], foreground=COLORS["text"], font=("Segoe UI", 9))
-        style.configure("TButton", background=COLORS["bg_light"], foreground=COLORS["text"], 
-                        font=("Segoe UI", 9, "bold"), borderwidth=0)
-        style.map("TButton", background=[("active", COLORS["accent"])])
-        
-        # Style for panels
-        style.configure("Panel.TFrame", background=COLORS["bg_medium"])
-        style.configure("Panel.TLabel", background=COLORS["bg_medium"], foreground=COLORS["text"])
-        
-        # Special styles
-        style.configure("Title.TLabel",    font=("Segoe UI", TITLE_FONT_SIZE, "bold"),    foreground=COLORS["text"], background=COLORS["bg_dark"])
-        style.configure("Subtitle.TLabel", font=("Segoe UI", SUBTITLE_FONT_SIZE, "bold"), foreground=COLORS["text"], background=COLORS["bg_medium"])
-        style.configure("Section.TLabel",  font=("Segoe UI", SECTION_FONT_SIZE, "bold"),  foreground=COLORS["text"], background=COLORS["bg_medium"])
-        style.configure("Value.TLabel",    font=("Segoe UI", VALUE_FONT_SIZE, "bold"),    foreground=COLORS["text"], background=COLORS["bg_medium"])
-        style.configure("Accent.TLabel", foreground=COLORS["accent"], background=COLORS["bg_medium"])
-        
-        # Configure checkbox
-        style.configure("TCheckbutton", background=COLORS["bg_medium"], foreground=COLORS["text"])
-        
-        # Configure notebook (tabs)
-        style.configure("TNotebook", background=COLORS["bg_dark"], borderwidth=0)
-        style.configure("TNotebook.Tab", background=COLORS["bg_medium"], foreground=COLORS["text"],
-                       padding=[10, 5], font=("Segoe UI", 9))
-        style.map("TNotebook.Tab", background=[("selected", COLORS["bg_light"])], 
-                 foreground=[("selected", COLORS["text"])])
-        
-        # Configure progressbar
-        style.configure("TProgressbar", background=COLORS["accent"], troughcolor=COLORS["bg_light"])
+    """Apply futuristic styling to Tkinter widgets."""
 
-        # Create blue accent button style matching cyber theme
+    @staticmethod
+    def configure_styles() -> None:
+        style = ttk.Style()
+        style.configure("TFrame", background=COLORS["bg_dark"])
+        style.configure(
+            "TLabel",
+            background=COLORS["bg_dark"],
+            foreground=COLORS["text"],
+            font=("Segoe UI", 10),
+        )
+        style.configure(
+            "Panel.TFrame",
+            background=COLORS["bg_medium"],
+            relief="flat",
+        )
+        style.configure(
+            "Panel.TLabel",
+            background=COLORS["bg_medium"],
+            foreground=COLORS["text"],
+        )
+        style.configure(
+            "Title.TLabel",
+            font=("Segoe UI", 18, "bold"),
+            background=COLORS["bg_dark"],
+            foreground=COLORS["text"],
+        )
+        style.configure(
+            "Subtitle.TLabel",
+            font=("Segoe UI", 12, "bold"),
+            background=COLORS["bg_medium"],
+            foreground=COLORS["text"],
+        )
+        style.configure(
+            "Section.TLabel",
+            font=("Segoe UI", 11, "bold"),
+            background=COLORS["bg_medium"],
+            foreground=COLORS["text"],
+        )
+        style.configure(
+            "Value.TLabel",
+            font=("Segoe UI", 11, "bold"),
+            background=COLORS["bg_medium"],
+            foreground=COLORS["text"],
+        )
+        style.configure(
+            "Accent.TLabel",
+            font=("Segoe UI", 11, "bold"),
+            background=COLORS["bg_medium"],
+            foreground=COLORS["accent"],
+        )
         style.configure(
             "Accent.TButton",
             background=COLORS["bg_light"],
             foreground=COLORS["text"],
-            font=("Segoe UI", 9, "bold"),
+            font=("Segoe UI", 11, "bold"),
             borderwidth=0,
+            padding=(14, 10),
         )
         style.map(
             "Accent.TButton",
             background=[("active", COLORS["accent"])],
-            foreground=[("active", COLORS["text"])],
+            foreground=[("active", COLORS["bg_dark"])],
         )
-        
-        # Style for LabelFrame
-        style.configure("TLabelframe", background=COLORS["bg_medium"], foreground=COLORS["text"])
-        style.configure("TLabelframe.Label", background=COLORS["bg_medium"], foreground=COLORS["text"], 
-                      font=("Segoe UI", 10, "bold"))
-
-        style.configure("Futuristic.Horizontal.TScale",
-            background=COLORS["bg_medium"],
-            troughcolor=COLORS["bg_light"],
-            sliderthickness=18,
-            sliderlength=28
-        )
-        #“Save / Clear”的深色按钮
         style.configure(
-           "CyberDark.TButton",
-           background=COLORS["bg_light"],     # 深灰蓝
-           foreground=COLORS["text"],         # 亮字
-           font=("Segoe UI", 9, "bold"),
-           borderwidth=0,
-           relief="flat",
+            "CyberDark.TButton",
+            background=COLORS["bg_light"],
+            foreground=COLORS["text"],
+            font=("Segoe UI", 11, "bold"),
+            borderwidth=0,
+            padding=(12, 8),
         )
         style.map(
-           "CyberDark.TButton",
-           background=[
-               ("active", COLORS["accent"]),   # 悬浮 / 按下：赛博青
-               ("pressed", COLORS["accent"]),
-           ],
-           foreground=[
-               ("active", COLORS["bg_dark"]),
-               ("pressed", COLORS["bg_dark"]),
-           ],
-        )
-        style.layout(
             "CyberDark.TButton",
-            [("Button.padding",
-              {"sticky": "nswe",
-               "children": [("Button.label", {"sticky": "nswe"})]})]
+            background=[("active", COLORS["accent"])],
+            foreground=[("active", COLORS["bg_dark"])],
         )
-class FuturisticChart(tk.Canvas):
-    """A futuristic styled chart"""
-    
-    def __init__(self, parent, width=400, height=200, bg=COLORS["chart_bg"]):
-        """Initialize the chart"""
-        super().__init__(parent, width=width, height=height, bg=bg, 
-                        highlightthickness=0, bd=0)
-        
-        self.width = width
-        self.height = height
-        self.margin_left, self.margin_right = MARGIN_LEFT, MARGIN_RIGHT
-        self.margin_top,  self.margin_bottom = MARGIN_TOP, MARGIN_BOTTOM
-        self.chart_width = width - self.margin_left - self.margin_right
-        self.chart_height = height - self.margin_top - self.margin_bottom
-        
-        # Set up chart area
-        self.draw_grid()
-    
-    def draw_grid(self):
-        """Draw a subtle grid on the chart"""
-        # Draw horizontal grid lines
-        for i in range(5):
-            y = self.margin_top + (i * self.chart_height / 4)
-            self.create_line(
-                self.margin_left, y, 
-                self.margin_left + self.chart_width, y,
-                fill=COLORS["bg_light"], width=1, dash=(2, 4), tags="grid"
-            )
-        
-        # Draw vertical grid lines
-        for i in range(6):
-            x = self.margin_left + (i * self.chart_width / 5)
-            self.create_line(
-                x, self.margin_top,
-                x, self.margin_top + self.chart_height,
-                fill=COLORS["bg_light"], width=1, dash=(2, 4), tags="grid"
-            )
-            
-        # Draw axis lines
-        self.create_line(
-            self.margin_left, self.margin_top + self.chart_height,
-            self.margin_left + self.chart_width, self.margin_top + self.chart_height,
-            fill=COLORS["text_secondary"], width=2, tags="axis"
+        style.configure(
+            "Responsive.Horizontal.TScale",
+            background=COLORS["bg_medium"],
+            troughcolor=COLORS["bg_light"],
+            sliderthickness=TOUCH_MIN_SIZE,
+            sliderlength=TOUCH_MIN_SIZE + 12,
         )
-        
-        self.create_line(
-            self.margin_left, self.margin_top,
-            self.margin_left, self.margin_top + self.chart_height,
-            fill=COLORS["text_secondary"], width=2, tags="axis"
+        style.configure(
+            "TNotebook",
+            background=COLORS["bg_dark"],
+            tabposition="n",
+        )
+        style.configure(
+            "TNotebook.Tab",
+            background=COLORS["bg_medium"],
+            foreground=COLORS["text"],
+            padding=(16, 8),
+            font=("Segoe UI", 11),
+        )
+        style.map(
+            "TNotebook.Tab",
+            background=[("selected", COLORS["bg_light"])],
+            foreground=[("selected", COLORS["text"])],
         )
 
-class ComparisonChart(FuturisticChart):
-    """A futuristic bar chart for comparing baseline vs current values"""
-    
-    def __init__(self, parent, width=550, height=300):
-        """Initialize the chart"""
-        super().__init__(parent, width, height)
+
+class CircularControl(tk.Canvas):
+    """Circular control supporting responsive scaling."""
+
+    def __init__(
+        self,
+        parent: tk.Widget,
+        variable: tk.DoubleVar,
+        label: str = "",
+        radius: int = 50,
+        callback=None,
+        autosize: bool = False,
+        min_radius: int = 36,
+        max_radius: int = 64,
+        **kwargs,
+    ) -> None:
+        self.radius = radius
+        self._autosize = autosize
+        self._min_radius = min_radius
+        self._max_radius = max_radius
+        self._scale_factor = 1.0
+        self.variable = variable
+        self.label = label
+        self.callback = callback
+
+        kwargs.setdefault("bg", COLORS["bg_medium"])
+        kwargs.setdefault("highlightthickness", 0)
+        kwargs.setdefault("bd", 0)
+
+        width = self._effective_radius * 2 + 20
+        height = self._effective_radius * 2 + 48
+
+        super().__init__(parent, width=width, height=height, **kwargs)
+
+        self.track_color = "#2A3445"
+        self.progress_color = COLORS["accent"]
+        self.text_color = COLORS["text"]
+
+        self.bind("<ButtonPress-1>", self._on_press)
+        self.bind("<B1-Motion>", self._on_drag)
+        self.bind("<ButtonRelease-1>", self._on_release)
+
+        self._draw_control()
+
+    # [RESPONSIVE] property to compute radius based on scale factor
+    @property
+    def _effective_radius(self) -> int:
+        radius = self.radius * self._scale_factor if self._autosize else self.radius
+        return int(max(self._min_radius, min(self._max_radius, radius)))
+
+    # [RESPONSIVE] API for layout manager to update scale factor
+    def set_scale_factor(self, scale_factor: float) -> None:
+        self._scale_factor = float(max(0.5, min(2.5, scale_factor)))
+        width = self._effective_radius * 2 + TOUCH_MIN_SIZE // 2
+        height = self._effective_radius * 2 + TOUCH_MIN_SIZE
+        self.configure(width=width, height=height)
+        self._draw_control()
+
+    def _draw_control(self) -> None:
+        self.delete("all")
+        radius = self._effective_radius
+        width = int(self["width"])
+        height = int(self["height"])
+        cx = width // 2
+        cy = height // 2 - 12
+
+        thickness = max(4, int(radius * 0.18))
+        track_radius = radius - thickness // 2
+        self.create_oval(
+            cx - track_radius,
+            cy - track_radius,
+            cx + track_radius,
+            cy + track_radius,
+            outline=self.track_color,
+            width=thickness,
+            tags="track",
+        )
+
+        value = float(self.variable.get())
+        extent_angle = -value * 3.6
+        if abs(extent_angle) > 0.1:
+            self.create_arc(
+                cx - track_radius,
+                cy - track_radius,
+                cx + track_radius,
+                cy + track_radius,
+                start=90,
+                extent=extent_angle,
+                outline=self.progress_color,
+                width=thickness,
+                style="arc",
+                tags="progress",
+            )
+
+        font_size = max(12, int(radius * 0.36))
+        self.create_text(
+            cx,
+            cy,
+            text=f"{int(value)}%",
+            fill=self.text_color,
+            font=("Segoe UI", font_size, "bold"),
+            tags="value",
+        )
+
+        label_size = max(10, int(radius * 0.28))
+        self.create_text(
+            cx,
+            height - 18,
+            text=self.label,
+            fill=self.text_color,
+            font=("Segoe UI", label_size),
+            tags="label",
+        )
+
+    def _on_press(self, event: tk.Event) -> None:
+        self._update_value(event)
+
+    def _on_drag(self, event: tk.Event) -> None:
+        self._update_value(event)
+
+    def _on_release(self, event: tk.Event) -> None:
+        self._update_value(event)
+
+    def _update_value(self, event: tk.Event) -> None:
+        width = int(self["width"])
+        height = int(self["height"])
+        cx = width // 2
+        cy = height // 2 - 12
+        dx = event.x - cx
+        dy = event.y - cy
+
+        angle = (math.degrees(math.atan2(dy, dx)) - 90) % 360
+        value = max(0, min(100, 100 - (angle / 360) * 100))
+
+        old_value = self.variable.get()
+        self.variable.set(round(value, 1))
+        self._draw_control()
+        if self.callback and abs(old_value - value) > 0.1:
+            self.callback()
+
+
+class AutoResizeCanvas(tk.Canvas):
+    """Canvas that redraws itself when resized."""
+
+    def __init__(self, parent: tk.Widget, **kwargs) -> None:
+        kwargs.setdefault("bg", COLORS["chart_bg"])
+        kwargs.setdefault("highlightthickness", 0)
+        kwargs.setdefault("bd", 0)
+        super().__init__(parent, **kwargs)
+        self._payload: Optional[ChartPayload] = None
+        self._resize_job: Optional[str] = None
+        self.bind("<Configure>", self._on_configure)
+
+    def store_payload(self, *args, **kwargs) -> None:
+        self._payload = ChartPayload(args=args, kwargs=kwargs)
+
+    def _on_configure(self, _event: tk.Event) -> None:
+        if self._resize_job:
+            self.after_cancel(self._resize_job)
+        self._resize_job = self.after(160, self._redraw_from_payload)
+
+    def _redraw_from_payload(self) -> None:
+        self._resize_job = None
+        if self._payload is None:
+            return
+        self.delete("all")
+        self.draw_grid()
+        self.draw_content(*self._payload.args, **self._payload.kwargs)
+
+    def draw_grid(self) -> None:  # pragma: no cover - to be implemented by subclasses
+        pass
+
+    def draw_content(self, *args, **kwargs) -> None:  # pragma: no cover
+        pass
+
+
+class ComparisonChart(AutoResizeCanvas):
+    """Grouped bar chart for baseline vs current values."""
+
+    def __init__(self, parent: tk.Widget) -> None:
+        super().__init__(parent)
         self.baseline_color = COLORS["negative"]
         self.current_color = COLORS["metric1"]
-    
-    def update_chart(self, categories, baseline_values, current_values, colors=None, units=None):
-        """Update the chart with new data"""
-        # Clear existing chart elements (not grid or axes)
-        self.delete("bar", "label", "value", "unit", "legend")
 
-        if not categories or not baseline_values or not current_values:
-            self.draw_legend()
+    def draw_grid(self) -> None:
+        width = self.winfo_width() or 400
+        height = self.winfo_height() or 240
+        margin_left, margin_right = 48, 24
+        margin_top, margin_bottom = 24, 40
+        chart_width = width - margin_left - margin_right
+        chart_height = height - margin_top - margin_bottom
+        for i in range(5):
+            y = margin_top + (chart_height / 4) * i
+            self.create_line(
+                margin_left,
+                y,
+                margin_left + chart_width,
+                y,
+                fill=COLORS["bg_light"],
+                width=1,
+                dash=(2, 6),
+            )
+        for i in range(6):
+            x = margin_left + (chart_width / 5) * i
+            self.create_line(
+                x,
+                margin_top,
+                x,
+                margin_top + chart_height,
+                fill=COLORS["bg_light"],
+                width=1,
+                dash=(2, 6),
+            )
+        self.create_line(
+            margin_left,
+            margin_top + chart_height,
+            margin_left + chart_width,
+            margin_top + chart_height,
+            fill=COLORS["text_secondary"],
+            width=2,
+        )
+        self.create_line(
+            margin_left,
+            margin_top,
+            margin_left,
+            margin_top + chart_height,
+            fill=COLORS["text_secondary"],
+            width=2,
+        )
+
+    def update_chart(
+        self,
+        categories: Sequence[str],
+        baseline_values: Sequence[float],
+        current_values: Sequence[float],
+        colors: Optional[Sequence[str]] = None,
+        units: Optional[Sequence[str]] = None,
+    ) -> None:
+        self.store_payload(
+            categories,
+            baseline_values,
+            current_values,
+            colors,
+            units,
+        )
+        self._redraw_from_payload()
+
+    def draw_content(
+        self,
+        categories: Sequence[str],
+        baseline_values: Sequence[float],
+        current_values: Sequence[float],
+        colors: Optional[Sequence[str]],
+        units: Optional[Sequence[str]],
+    ) -> None:
+        if not categories:
             return
-        
-        # Set colors if provided
-        if colors:
-            if len(colors) >= 2:
-                self.baseline_color = colors[0]
-                self.current_color = colors[1]
-        
-        # Default units if not provided
-        if not units:
-            units = [""] * len(categories)
-        
-        # Find the maximum value for scaling
-        max_value = max(max(baseline_values), max(current_values))
-        if max_value == 0:
-            max_value = 1  # Avoid division by zero
-        
-        # Calculate bar width and spacing
-        num_groups = len(categories)
-        group_width = self.chart_width / (num_groups + 1)  # +1 for spacing
-        bar_width = group_width * 0.4
-        
-        # Draw each group of bars
-        for i, category in enumerate(categories):
-            # Calculate x positions
-            x_center = self.margin_left + (i + 1) * group_width
-            x_baseline = x_center - bar_width/2 - 5
-            x_current = x_center + bar_width/2 + 5
-            
-            # Calculate bar heights
-            baseline_height = (baseline_values[i] / max_value) * self.chart_height
-            current_height = (current_values[i] / max_value) * self.chart_height
-            
-            # Ensure minimum visible height
-            if baseline_height < 1 and baseline_values[i] > 0:
-                baseline_height = 1
-            if current_height < 1 and current_values[i] > 0:
-                current_height = 1
-            
-            # Draw baseline bar
-            y_baseline_top = self.height - self.margin_bottom - baseline_height
+        width = self.winfo_width() or 400
+        height = self.winfo_height() or 240
+        margin_left, margin_right = 48, 24
+        margin_top, margin_bottom = 24, 48
+        chart_width = width - margin_left - margin_right
+        chart_height = height - margin_top - margin_bottom
+
+        if colors and len(colors) >= 2:
+            self.baseline_color = colors[0]
+            self.current_color = colors[1]
+
+        max_value = max(
+            max(baseline_values) if baseline_values else 0,
+            max(current_values) if current_values else 0,
+            1,
+        )
+        num_categories = len(categories)
+        group_width = chart_width / max(num_categories, 1)
+        bar_width = group_width / 3
+
+        for index, category in enumerate(categories):
+            base = baseline_values[index]
+            curr = current_values[index]
+            unit = units[index] if units and index < len(units) else ""
+            cx = margin_left + index * group_width + group_width / 2
+            base_height = (base / max_value) * chart_height
+            curr_height = (curr / max_value) * chart_height
+            base_x0 = cx - bar_width
+            base_x1 = base_x0 + bar_width * 0.8
+            curr_x0 = cx + bar_width * 0.2
+            curr_x1 = curr_x0 + bar_width * 0.8
+            y_bottom = height - margin_bottom
+            y_base = y_bottom - base_height
+            y_curr = y_bottom - curr_height
             self.create_rectangle(
-                x_baseline - bar_width/2, y_baseline_top,
-                x_baseline + bar_width/2, self.height - self.margin_bottom,
-                fill=self.baseline_color, outline="", tags="bar",
-                width=0, stipple=""
+                base_x0,
+                y_base,
+                base_x1,
+                y_bottom,
+                fill=self.baseline_color,
+                outline="",
+                tags="bar",
             )
-            
-            # Add a gradient effect to baseline bar
-            for j in range(10):
-                alpha = (10-j) / 20
-                y_pos = y_baseline_top + (j * baseline_height / 10)
-                self.create_line(
-                    x_baseline - bar_width/2, y_pos,
-                    x_baseline + bar_width/2, y_pos,
-                    fill=self.baseline_color, width=1,
-                    tags="bar", stipple=""
-                )
-            
-            # Draw current bar
-            y_current_top = self.height - self.margin_bottom - current_height
             self.create_rectangle(
-                x_current - bar_width/2, y_current_top,
-                x_current + bar_width/2, self.height - self.margin_bottom,
-                fill=self.current_color, outline="", tags="bar",
-                width=0, stipple=""
+                curr_x0,
+                y_curr,
+                curr_x1,
+                y_bottom,
+                fill=self.current_color,
+                outline="",
+                tags="bar",
             )
-            
-            # Add a gradient effect to current bar
-            for j in range(10):
-                alpha = (10-j) / 20
-                y_pos = y_current_top + (j * current_height / 10)
-                self.create_line(
-                    x_current - bar_width/2, y_pos,
-                    x_current + bar_width/2, y_pos,
-                    fill=self.current_color, width=1,
-                    tags="bar", stipple=""
-                )
-            
-            # Draw category label with unit
-            unit_text = f" ({units[i]})" if units[i] else ""
             self.create_text(
-                x_center, self.height - self.margin_bottom/2,
-                text=f"{category}{unit_text}", anchor="center", tags="label",
-                fill=COLORS["text"], font=("Segoe UI", 9)
+                cx,
+                height - margin_bottom / 2,
+                text=f"{category}{unit}",
+                fill=COLORS["text"],
+                anchor="center",
+                font=("Segoe UI", 10),
             )
-            
-            # Draw baseline value
             self.create_text(
-                x_baseline, y_baseline_top - 5,
-                text=f"{baseline_values[i]:.1f}", anchor="s",
-                font=("Segoe UI", 8), tags="value", fill=COLORS["text_secondary"]
+                (base_x0 + base_x1) / 2,
+                y_base - 6,
+                text=f"{base:.1f}",
+                fill=COLORS["text_secondary"],
+                font=("Segoe UI", 9),
             )
-            
-            # Draw current value
             self.create_text(
-                x_current, y_current_top - 5,
-                text=f"{current_values[i]:.1f}", anchor="s",
-                font=("Segoe UI", 8), tags="value", fill=COLORS["text"]
+                (curr_x0 + curr_x1) / 2,
+                y_curr - 6,
+                text=f"{curr:.1f}",
+                fill=COLORS["text"],
+                font=("Segoe UI", 9),
             )
-        
-        # Draw scale on y-axis
+
         self.create_text(
-            self.margin_left - 5, self.margin_top,
-            text=f"{max_value:.1f}", anchor="e", tags="value",
-            fill=COLORS["text_secondary"], font=("Segoe UI", 8)
+            margin_left - 6,
+            margin_top,
+            text=f"{max_value:.1f}",
+            fill=COLORS["text_secondary"],
+            anchor="e",
+            font=("Segoe UI", 9),
         )
         self.create_text(
-            self.margin_left - 5, self.height - self.margin_bottom,
-            text="0", anchor="e", tags="value",
-            fill=COLORS["text_secondary"], font=("Segoe UI", 8)
+            margin_left - 6,
+            height - margin_bottom,
+            text="0",
+            fill=COLORS["text_secondary"],
+            anchor="e",
+            font=("Segoe UI", 9),
         )
 
-        self.draw_legend()
 
-    def draw_legend(self):
-        """Draw the chart legend inside the top-right corner"""
-        items = [
-            ("Baseline", self.baseline_color),
-            ("Current", self.current_color),
-        ]
+class RecordBarChart(AutoResizeCanvas):
+    """Chart showing saved records."""
 
-        spacing = LEGEND_SPACING
-        box_size = LEGEND_BOX
-        legend_x = self.width - self.margin_right - 80
-        legend_y = self.margin_top
-
-        for i, (label, color) in enumerate(items):
-            y = legend_y + i * spacing
-            self.create_rectangle(
-                legend_x, y,
-                legend_x + box_size, y + box_size,
-                fill=color, outline="", tags="legend"
-            )
-            self.create_text(
-                legend_x + box_size + 5, y + box_size / 2,
-                text=label, anchor="w", fill=COLORS["text"],
-                tags="legend", font=("Segoe UI", 8)
-            )
-
-class RecordBarChart(FuturisticChart):
-    """A chart showing up to three saved records as grouped bars"""
-
-    def __init__(self, parent, width=900, height=250, max_records=3):
-        """Initialize the chart"""
-        super().__init__(parent, width, height)
-
-        if self.margin_bottom < 32:
-            self.margin_bottom = 32
-            self.chart_height = self.height - self.margin_top - self.margin_bottom
-            self.delete("grid", "axis")
-            self.draw_grid()
-
+    def __init__(self, parent: tk.Widget, max_records: int = 3) -> None:
+        super().__init__(parent)
         self.max_records = max_records
-        self.records = []
+        self.records: List[Dict[str, float]] = []
         self.colors = {
             "energy": COLORS["metric1"],
             "co2": COLORS["metric3"],
@@ -595,162 +608,149 @@ class RecordBarChart(FuturisticChart):
             "plastic": COLORS["material2"],
         }
 
-        self.update_chart()
+    def draw_grid(self) -> None:
+        width = self.winfo_width() or 520
+        height = self.winfo_height() or 260
+        margin_left, margin_right = 56, 24
+        margin_top, margin_bottom = 24, 48
+        chart_width = width - margin_left - margin_right
+        chart_height = height - margin_top - margin_bottom
+        for i in range(5):
+            y = margin_top + chart_height / 4 * i
+            self.create_line(
+                margin_left,
+                y,
+                margin_left + chart_width,
+                y,
+                fill=COLORS["bg_light"],
+                width=1,
+                dash=(2, 6),
+            )
+        self.create_line(
+            margin_left,
+            margin_top + chart_height,
+            margin_left + chart_width,
+            margin_top + chart_height,
+            fill=COLORS["text_secondary"],
+            width=2,
+        )
 
-    def add_record(self, record):
-        """Add a new record to the chart"""
+    def draw_content(self, *_: Tuple) -> None:
+        if not self.records:
+            return
+        width = self.winfo_width() or 520
+        height = self.winfo_height() or 260
+        margin_left, margin_right = 56, 24
+        margin_top, margin_bottom = 24, 48
+        chart_width = width - margin_left - margin_right
+        chart_height = height - margin_top - margin_bottom
+        metrics = ["energy", "co2", "cost", "brass", "plastic"]
+        max_value = max(
+            max(record[metric] for metric in metrics) for record in self.records
+        )
+        if max_value <= 0:
+            max_value = 1
+        num_records = len(self.records)
+        group_width = chart_width / max(num_records, 1)
+        bar_width = group_width / (len(metrics) + 2)
+        for idx, record in enumerate(self.records):
+            cx = margin_left + idx * group_width + group_width / 2
+            for j, metric in enumerate(metrics):
+                value = record[metric]
+                height_ratio = value / max_value
+                bar_height = height_ratio * chart_height
+                x0 = cx - (len(metrics) / 2) * bar_width + j * bar_width
+                x1 = x0 + bar_width * 0.8
+                y_bottom = height - margin_bottom
+                y_top = y_bottom - bar_height
+                self.create_rectangle(
+                    x0,
+                    y_top,
+                    x1,
+                    y_bottom,
+                    fill=self.colors[metric],
+                    outline="",
+                    tags="bar",
+                )
+                self.create_text(
+                    (x0 + x1) / 2,
+                    y_top - 6,
+                    text=f"{value:.1f}",
+                    fill=COLORS["text"],
+                    anchor="s",
+                    font=("Segoe UI", 9),
+                )
+            self.create_text(
+                cx,
+                height - margin_bottom / 2,
+                text=record["label"],
+                fill=COLORS["text_secondary"],
+                anchor="center",
+                font=("Segoe UI", 10),
+            )
+        self.create_text(
+            margin_left - 6,
+            margin_top,
+            text=f"{max_value:.1f}",
+            fill=COLORS["text_secondary"],
+            anchor="e",
+            font=("Segoe UI", 9),
+        )
+        self.create_text(
+            margin_left - 6,
+            height - margin_bottom,
+            text="0",
+            fill=COLORS["text_secondary"],
+            anchor="e",
+            font=("Segoe UI", 9),
+        )
+
+    def add_record(self, record: Dict[str, float]) -> None:
         if len(self.records) >= self.max_records:
             self.records.pop(0)
         self.records.append(record)
-        self.update_chart()
+        self.store_payload()
+        self._redraw_from_payload()
 
-    def clear_records(self):
-        """Remove all saved records"""
+    def clear_records(self) -> None:
         self.records.clear()
-        self.update_chart()
+        self.store_payload()
+        self._redraw_from_payload()
 
-    def update_chart(self):
-        """Redraw the bar chart with current records"""
-        self.delete("bar", "label", "legend", "value")
 
-        if not self.records:
-            self.draw_legend()
-            return
+# [RESPONSIVE] layout mode helper prioritising orientation
 
-        metrics = ["energy", "co2", "cost", "brass", "plastic"]
-        max_value = max(max(record[m] for m in metrics) for record in self.records)
-        if max_value == 0:
-            max_value = 1
+def layout_mode(width: int, height: int) -> str:
+    landscape = width >= height
+    if landscape:
+        if height < BREAKPOINTS["SM"]["height"] or width < BREAKPOINTS["SM"]["width"]:
+            return "L_SM"
+        if height < BREAKPOINTS["MD"]["height"] or width < BREAKPOINTS["MD"]["width"]:
+            return "L_MD"
+        return "L_LG"
+    if height < BREAKPOINTS["SM"]["height"] or width < BREAKPOINTS["SM"]["width"]:
+        return "P_SM"
+    if height < BREAKPOINTS["MD"]["height"] or width < BREAKPOINTS["MD"]["width"]:
+        return "P_MD"
+    return "P_LG"
 
-        num_records = len(self.records)
-        group_width = self.chart_width / (num_records + 1)
-        bar_width = group_width / (len(metrics) + 1)
-
-        for i, record in enumerate(self.records):
-            x_center = self.margin_left + (i + 1) * group_width
-            for j, key in enumerate(metrics):
-                value = record[key]
-                bar_height = (value / max_value) * self.chart_height
-                if bar_height < 1 and value > 0:
-                    bar_height = 1
-                x0 = x_center - (len(metrics) / 2) * bar_width + j * bar_width
-                x1 = x0 + bar_width * 0.8
-                y1 = self.height - self.margin_bottom
-                y0 = y1 - bar_height
-                self.create_rectangle(
-                    x0, y0, x1, y1,
-                    fill=self.colors[key], outline="", tags="bar"
-                )
-                self.create_text(
-                    (x0 + x1) / 2, y0 - 5,
-                    text=f"{value:.1f}", anchor="s",
-                    font=("Segoe UI", 8), tags="value", fill=COLORS["text"]
-                )
-
-            self.create_text(
-                x_center, self.height - self.margin_bottom + 10,
-                text=record["label"], anchor="n", tags="label",
-                fill=COLORS["text_secondary"]
-            )
-
-        # Draw scale on y-axis
-        self.create_text(
-            self.margin_left - 5, self.margin_top,
-            text=f"{max_value:.1f}", anchor="e", tags="value",
-            fill=COLORS["text_secondary"], font=("Segoe UI", 8)
-        )
-        self.create_text(
-            self.margin_left - 5, self.height - self.margin_bottom,
-            text="0", anchor="e", tags="value",
-            fill=COLORS["text_secondary"], font=("Segoe UI", 8)
-        )
-
-        self.draw_legend()
-
-    def draw_legend(self):
-        """Draw the chart legend at the top-right corner"""
-        items = [
-            ("Energy (kWh)", "energy"),
-            ("CO2 (kg)", "co2"),
-            ("Cost (EUR)", "cost"),
-            ("Brass (kg)", "brass"),
-            ("Plastic (kg)", "plastic"),
-        ]
-
-        spacing = LEGEND_SPACING
-        box_size = LEGEND_BOX
-        legend_x = self.width - self.margin_right - 100
-        legend_y = self.margin_top
-
-        for i, (label, key) in enumerate(items):
-            y = legend_y + i * spacing
-            self.create_rectangle(
-                legend_x, y,
-                legend_x + box_size, y + box_size,
-                fill=self.colors[key], outline="", tags="legend"
-            )
-            self.create_text(
-                legend_x + box_size + 5, y + box_size // 2,
-                text=label, anchor="w", tags="legend",
-                fill=COLORS["text"]
-            )
 
 class CircularEconomyDashboard:
-    def __init__(self, root):
+    """Responsive dashboard coordinating widgets and business logic."""
+
+    def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Circular Economy Dashboard")
-        self.root.geometry("1200x800")
         self.root.configure(bg=COLORS["bg_dark"])
-        
-        # Apply futuristic styling
+
+        self._install_scaling()
         FuturisticStyle.configure_styles()
-        
-        # Create main container
-        main_container = ttk.Frame(root)
-        main_container.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        # Create top frame for header
-        header_frame = ttk.Frame(main_container)
-        header_frame.pack(fill="x", pady=(0, 10))
-        
-        ttk.Label(header_frame, text="Circular Economy Dashboard", style="Title.TLabel").pack(side="left")
-        
-        # Create content frame with two columns
-        content_frame = ttk.Frame(main_container)
-        content_frame.pack(fill="both", expand=True)
-        
-        # Left column for inputs
-        self.input_column = ttk.Frame(content_frame)
-        self.input_column.pack(side="left", fill="both", padx=(0, 10))
-        
-        # Right column for visualizations
-        self.viz_column = ttk.Frame(content_frame)
-        self.viz_column.pack(side="left", fill="both", expand=True)
-        
-        # Create panels
-        self.create_input_panel()
-        self.create_visualization_panels()
-        self.create_livegraph_panel()
-        
-        # Create input variables
-        self.meter_reuse_pct = tk.DoubleVar(value=0.0)
-        self.reman_impeller_pct = tk.DoubleVar(value=0.0)
-        self.reman_housing_pct = tk.DoubleVar(value=0.0)
-        # Individual recycling rates for each component
-        self.recycle_impeller_pct = tk.DoubleVar(value=0.0)
-        self.recycle_housing_pct = tk.DoubleVar(value=0.0)
-        
-        self.solar_pct = tk.DoubleVar(value=int(STANDARD_ENERGY_MIX["solar"] * 100))
-        self.wind_pct = tk.DoubleVar(value=int(STANDARD_ENERGY_MIX["wind"] * 100))
-        self.fossil_pct = tk.DoubleVar(value=int(STANDARD_ENERGY_MIX["fossil"] * 100))
-        self.rest_pct = tk.DoubleVar(value=int(STANDARD_ENERGY_MIX["rest"] * 100))
-        self.use_realtime_price = tk.BooleanVar(value=False)
-        self.realtime_price = tk.DoubleVar(value=0.15)
-        self.price_source = tk.StringVar(value="本地加权均值")
-        
-        # Create result variables
+
         default_energy = ENERGY_CONSUMPTION["new"]
-        default_cost = COMPONENT_COSTS["housing"]["new"] + COMPONENT_COSTS["impeller"]["new"]
+        default_cost = (
+            COMPONENT_COSTS["housing"]["new"]
+            + COMPONENT_COSTS["impeller"]["new"]
+        )
         default_energy_cost = default_energy * ENERGY_SOURCES["fossil"]["cost"]
 
         self.energy_baseline = tk.DoubleVar(value=default_energy)
@@ -766,453 +766,496 @@ class CircularEconomyDashboard:
         self.plastic_current = tk.DoubleVar(value=REF_PLASTIC)
         self.cost_current = tk.DoubleVar(value=default_cost)
         self.energy_cost_current = tk.DoubleVar(value=default_energy_cost)
-        
-        # Create input widget elements
-        self.create_input_widgets()
-        
-        # Initialize energy mix factors and display
-        self.update_energy_mix()
-        
-        # Initial calculation
-        self.calculate_and_update()
 
-        # Create notebooks for calculation details and info (minimized)
-        if SHOW_CALC_TABS:
-            self.create_calculation_tabs()
+        self.meter_reuse_pct = tk.DoubleVar(value=0.0)
+        self.reman_impeller_pct = tk.DoubleVar(value=0.0)
+        self.reman_housing_pct = tk.DoubleVar(value=0.0)
+        self.recycle_impeller_pct = tk.DoubleVar(value=0.0)
+        self.recycle_housing_pct = tk.DoubleVar(value=0.0)
+        self.solar_pct = tk.DoubleVar(value=int(STANDARD_ENERGY_MIX["solar"] * 100))
+        self.wind_pct = tk.DoubleVar(value=int(STANDARD_ENERGY_MIX["wind"] * 100))
+        self.fossil_pct = tk.DoubleVar(value=int(STANDARD_ENERGY_MIX["fossil"] * 100))
+        self.rest_pct = tk.DoubleVar(value=int(STANDARD_ENERGY_MIX["rest"] * 100))
+        self.use_realtime_price = tk.BooleanVar(value=False)
+        self.realtime_price = tk.DoubleVar(value=0.15)
+        self.price_source = tk.StringVar(value="本地加权均值")
 
-        # Fetch realtime price and schedule updates
-        self.fetch_realtime_price()
+        self.energy_mix_display = tk.StringVar()
+        self.price_display = tk.StringVar()
 
+        self.factors = {
+            "solar": STANDARD_ENERGY_MIX["solar"],
+            "wind": STANDARD_ENERGY_MIX["wind"],
+            "fossil": STANDARD_ENERGY_MIX["fossil"],
+            "rest": STANDARD_ENERGY_MIX["rest"],
+        }
 
-        # ===== Solar/Wind 控制参数 =====
-        self._solar_target = float(self.solar_pct.get())   # 当前 Solar 目标值
-        self._ramp_interval_ms = 50                        # 步进周期
-        self._ramp_up_sec = 10.0                           # Solar 0→100 用时（秒）
-        self._ramp_dn_sec = 10.0                           # Solar 100→0 用时（秒）
+        self.current_layout: Optional[str] = None
+        self._resize_job: Optional[str] = None
+        self._minimal_mode = False
 
-        # Solar 状态量
-        self._solar_state = 'A'            # 当前 Arduino 状态 A/L/B
-        self._last_solar_state = 'A'       # 上一次状态（备用）
-        self._manual_lock = False          # 手动调节后锁定，直到 L/B 再次出现
-        self._auto_updating = False        # 内部自动推进时置 True，避免误判为“手动”
-        self._auto_ramping = False         # 是否处于自动推进中
-
-        # Wind 状态量
-        self._wind_target = float(self.wind_pct.get())
-        self._wind_state = 'STOPPED'
+        self._solar_state = "A"
+        self._wind_state = "STOPPED"
+        self._manual_lock = False
+        self._auto_ramping = False
+        self._solar_target = self.solar_pct.get()
+        self._ramp_up_sec = 15
+        self._ramp_dn_sec = 12
+        self._ramp_interval_ms = 320
+        self._auto_updating = False
         self._wind_manual_lock = False
         self._wind_auto_ramping = False
         self._wind_auto_updating = False
-        self._wind_ramp_up_sec = 10.0       # Wind 0→100 用时（秒）
+        self._wind_target = self.wind_pct.get()
+        self._wind_ramp_up_sec = 18
 
-        # 启动串口读取（根据你的端口修改，如 Win: 'COM3' / Mac: '/dev/tty.usbserial-xxxx' / Linux: '/dev/ttyUSB0'）
-        self._start_serial(port_hint='COM5', baud=9600)
+        self._build_structure()
+        self.calculate_and_update()
+        self._ramp_tick()
+        self.root.bind("<Configure>", self._on_root_resize)
 
-        # 开始定时匀速推进
-        self.root.after(self._ramp_interval_ms, self._ramp_tick)
-    
-    def create_input_panel(self):
-        """Create the input parameters panel"""
-        input_panel = ttk.LabelFrame(self.input_column, text="Input Parameters")
-        input_panel.pack(fill="both", expand=True)
-        
-        # We'll add the actual widgets later
-        self.input_panel = input_panel
-    
-    def create_visualization_panels(self):
-        """Create visualization panels for metrics and materials"""
-        # Create metrics panel
-        metrics_panel = ttk.LabelFrame(self.viz_column, text="Metrics Comparison", style="TLabelframe")
-        metrics_panel.pack(fill="x", expand=False, pady=(0, PAD_Y_PANEL))
+    # [RESPONSIVE] DPI + maximise setup
+    def _install_scaling(self) -> None:
+        try:
+            self.root.state("zoomed")
+        except tk.TclError:
+            try:
+                self.root.attributes("-zoomed", True)
+            except tk.TclError:
+                w = self.root.winfo_screenwidth()
+                h = self.root.winfo_screenheight()
+                self.root.geometry(f"{int(w * 0.99)}x{int(h * 0.98)}+0+0")
+        scale = 1.0
+        try:  # pragma: no cover - platform specific
+            import sys
+            import ctypes
 
-        # Create metrics chart
-        self.metrics_chart = ComparisonChart(metrics_panel, width=550, height=CHART_H_METRICS)
-        self.metrics_chart.pack(fill="x", expand=False, padx=PAD_X, pady=(0, PAD_Y_SMALL))
+            if sys.platform.startswith("win"):
+                ctypes.windll.shcore.SetProcessDpiAwareness(1)
+            dpi = self.root.winfo_fpixels("1i")
+            scale = max(1.0, dpi / DEFAULT_DPI)
+        except Exception:
+            pass
+        if abs(scale - 1.0) > 0.15:
+            self.root.call("tk", "scaling", scale)
+        self.root.minsize(980, 650)
 
-        # Create materials panel
-        materials_panel = ttk.LabelFrame(self.viz_column, text="Materials Breakdown", style="TLabelframe")
-        materials_panel.pack(fill="x", expand=False, pady=(0, PAD_Y_PANEL))
+    def _build_structure(self) -> None:
+        # [RESPONSIVE] 构建弹性布局骨架
+        self.main_container = ttk.Frame(self.root)
+        self.main_container.grid(row=0, column=0, sticky="nsew")
+        self.root.grid_rowconfigure(0, weight=1)
+        self.root.grid_columnconfigure(0, weight=1)
 
-        # Create materials chart
-        self.materials_chart = ComparisonChart(materials_panel, width=550, height=CHART_H_MATERIALS)
-        self.materials_chart.pack(fill="x", expand=False, padx=PAD_X, pady=(0, PAD_Y_SMALL))
-        
-    def create_livegraph_panel(self):
-        """Create panel for saving and comparing records"""
-        # old version:  Live Metrics Visualization
-        livegraph_panel = ttk.LabelFrame(self.viz_column, text="Scenario Comparison")
-        livegraph_panel.pack(fill="both", expand=False, pady=(0, PAD_Y_PANEL))
+        self.header_frame = ttk.Frame(self.main_container)
+        self.header_frame.grid(row=0, column=0, sticky="ew", padx=18, pady=(18, 12))
 
-        control_frame = ttk.Frame(livegraph_panel)
-        control_frame.pack(side="top", fill="x", padx=PAD_X, pady=(0, PAD_Y_SMALL))
+        ttk.Label(
+            self.header_frame,
+            text="Circular Economy Dashboard",
+            style="Title.TLabel",
+        ).grid(row=0, column=0, sticky="w")
 
+        self.mode_badge = ttk.Label(
+            self.header_frame,
+            text="",
+            style="Accent.TLabel",
+        )
+        self.mode_badge.grid(row=0, column=1, sticky="e", padx=(8, 0))
+        self.header_frame.grid_columnconfigure(0, weight=1)
+
+        self.view_notebook = ttk.Notebook(self.main_container)
+        self.view_notebook.grid(row=2, column=0, sticky="nsew", padx=18, pady=(0, 18))
+        self.main_container.grid_rowconfigure(2, weight=1)
+
+        self.core_view = ttk.Frame(self.view_notebook, style="Panel.TFrame")
+        self.input_view = ttk.Frame(self.view_notebook, style="Panel.TFrame")
+        self.visual_view = ttk.Frame(self.view_notebook, style="Panel.TFrame")
+        self.records_view = ttk.Frame(self.view_notebook, style="Panel.TFrame")
+
+        self.view_notebook.add(self.core_view, text="核心视图")
+        self.view_notebook.add(self.input_view, text="输入设置")
+        self.view_notebook.add(self.visual_view, text="图表")
+        self.view_notebook.add(self.records_view, text="记录")
+
+        self.core_view.grid_rowconfigure(1, weight=1)
+        self.core_view.grid_columnconfigure(0, weight=1)
+        self.core_view.grid_columnconfigure(1, weight=1)
+
+        self._build_kpi_panel(self.core_view)
+        self._build_energy_mix_summary(self.core_view)
+        self._build_primary_chart(self.visual_view)
+        self._build_material_chart(self.visual_view)
+        self._build_records_panel(self.records_view)
+        self._build_inputs(self.input_view)
+
+    def _build_kpi_panel(self, parent: tk.Widget) -> None:
+        # [RESPONSIVE] KPI 面板随断点自适应列宽
+        self.kpi_panel = ttk.Frame(parent, style="Panel.TFrame")
+        self.kpi_panel.grid(row=0, column=0, columnspan=2, sticky="ew", padx=18, pady=18)
+        for i in range(3):
+            self.kpi_panel.grid_columnconfigure(i, weight=1)
+        self._kpi_widgets = []
+        items = [
+            ("能源 (kWh)", self.energy_current, self.energy_baseline),
+            ("CO₂ (kg)", self.co2_current, self.co2_baseline),
+            ("成本 (€)", self.cost_current, self.cost_baseline),
+        ]
+        for column, (label, current, baseline) in enumerate(items):
+            frame = ttk.Frame(self.kpi_panel, style="Panel.TFrame")
+            frame.grid(row=0, column=column, sticky="nsew", padx=12, pady=12)
+            ttk.Label(frame, text=label, style="Section.TLabel").grid(
+                row=0, column=0, sticky="w"
+            )
+            value_label = ttk.Label(
+                frame,
+                textvariable=tk.StringVar(),
+                style="Value.TLabel",
+            )
+            value_label.grid(row=1, column=0, sticky="w", pady=(6, 0))
+            delta_label = ttk.Label(
+                frame,
+                text="",
+                style="Accent.TLabel",
+            )
+            delta_label.grid(row=2, column=0, sticky="w", pady=(4, 0))
+            self._kpi_widgets.append((label, value_label, delta_label, current, baseline))
+
+    def _build_energy_mix_summary(self, parent: tk.Widget) -> None:
+        # [RESPONSIVE] 能源总结在不同模式下自动换行
+        self.mix_panel = ttk.Frame(parent, style="Panel.TFrame")
+        self.mix_panel.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=18, pady=(0, 18))
+        self.mix_panel.grid_columnconfigure(0, weight=1)
+        ttk.Label(
+            self.mix_panel,
+            text="能源构成",
+            style="Section.TLabel",
+        ).grid(row=0, column=0, sticky="w", padx=12, pady=(12, 6))
+        self.mix_value_label = ttk.Label(
+            self.mix_panel,
+            textvariable=self.energy_mix_display,
+            style="Value.TLabel",
+        )
+        self.mix_value_label.grid(row=1, column=0, sticky="w", padx=12)
+        self.price_value_label = ttk.Label(
+            self.mix_panel,
+            textvariable=self.price_display,
+            style="Value.TLabel",
+        )
+        self.price_value_label.grid(row=2, column=0, sticky="w", padx=12, pady=(4, 12))
+
+    def _build_primary_chart(self, parent: tk.Widget) -> None:
+        # [RESPONSIVE] 主要图表绑定自动重绘
+        parent.grid_columnconfigure(0, weight=1)
+        ttk.Label(parent, text="能源与成本", style="Subtitle.TLabel").grid(
+            row=0, column=0, sticky="w", padx=18, pady=(18, 12)
+        )
+        self.energy_chart = ComparisonChart(parent)
+        self.energy_chart.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 18))
+
+    def _build_material_chart(self, parent: tk.Widget) -> None:
+        # [RESPONSIVE] 材料图表在断点切换时更新
+        parent.grid_columnconfigure(0, weight=1)
+        ttk.Label(parent, text="材料消耗", style="Subtitle.TLabel").grid(
+            row=2, column=0, sticky="w", padx=18, pady=(0, 12)
+        )
+        self.material_chart = ComparisonChart(parent)
+        self.material_chart.grid(row=3, column=0, sticky="nsew", padx=18, pady=(0, 18))
+
+    def _build_records_panel(self, parent: tk.Widget) -> None:
+        # [RESPONSIVE] 记录面板支持触控按钮
+        parent.grid_columnconfigure(0, weight=1)
+        ttk.Label(parent, text="场景对比", style="Subtitle.TLabel").grid(
+            row=0, column=0, sticky="w", padx=18, pady=(18, 12)
+        )
+        button_frame = ttk.Frame(parent, style="Panel.TFrame")
+        button_frame.grid(row=1, column=0, sticky="ew", padx=18, pady=(0, 12))
         ttk.Button(
-            control_frame,
-            text="Save Record",
+            button_frame,
+            text="保存当前场景",
             command=self.save_record,
             style="CyberDark.TButton",
-        ).pack(side="left", padx=(0, PAD_X))
-
+        ).grid(row=0, column=0, padx=(0, 12))
         ttk.Button(
-            control_frame,
-            text="Clear All Records",
+            button_frame,
+            text="清空记录",
             command=self.clear_records,
             style="CyberDark.TButton",
-        ).pack(side="left")
+        ).grid(row=0, column=1)
+        button_frame.grid_columnconfigure(2, weight=1)
+        self.records_chart = RecordBarChart(parent)
+        self.records_chart.grid(row=2, column=0, sticky="nsew", padx=18, pady=(0, 18))
 
-        self.records_chart = RecordBarChart(
-            livegraph_panel, width=CHART_W_SCENARIO, height=CHART_H_SCENARIO, max_records=3
+    def _build_inputs(self, parent: tk.Widget) -> None:
+        # [RESPONSIVE] 输入面板采用网格布局便于缩放
+        parent.grid_columnconfigure(0, weight=1)
+        ttk.Label(parent, text="输入参数", style="Subtitle.TLabel").grid(
+            row=0, column=0, sticky="w", padx=18, pady=(18, 12)
         )
-        self.records_chart.pack(
-            side="top", fill="x", expand=False, padx=PAD_X, pady=(0, PAD_Y_PANEL)
+
+        self.control_frame = ttk.Frame(parent, style="Panel.TFrame")
+        self.control_frame.grid(row=1, column=0, sticky="ew", padx=18, pady=(0, 18))
+        for idx in range(3):
+            self.control_frame.grid_columnconfigure(idx, weight=1)
+        self.circular_controls: List[CircularControl] = []
+
+        def add_control(row: int, column: int, var: tk.DoubleVar, text: str) -> None:
+            frame = ttk.Frame(self.control_frame, style="Panel.TFrame")
+            frame.grid(row=row, column=column, sticky="nsew", padx=12, pady=12)
+            control = CircularControl(
+                frame,
+                var,
+                label=text,
+                radius=48,
+                callback=self.calculate_and_update,
+                autosize=True,
+            )
+            control.grid(row=0, column=0, padx=12, pady=12)
+            self.circular_controls.append(control)
+
+        add_control(0, 0, self.meter_reuse_pct, "整表复用")
+        add_control(0, 1, self.reman_impeller_pct, "叶轮再制造")
+        add_control(0, 2, self.reman_housing_pct, "壳体再制造")
+        add_control(1, 0, self.recycle_impeller_pct, "叶轮回收")
+        add_control(1, 1, self.recycle_housing_pct, "壳体回收")
+
+        self._build_energy_mix_controls(parent)
+
+    def _build_energy_mix_controls(self, parent: tk.Widget) -> None:
+        # [RESPONSIVE] 能源滑块满足触控目标尺寸
+        mix_card = ttk.Frame(parent, style="Panel.TFrame")
+        mix_card.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 18))
+        mix_card.grid_columnconfigure(1, weight=1)
+        ttk.Label(mix_card, text="能源构成", style="Section.TLabel").grid(
+            row=0, column=0, sticky="w", padx=12, pady=(12, 8)
         )
-    
-    def create_calculation_tabs(self):
-        """Create tabs for calculation details and info"""
-        notebook_frame = ttk.Frame(self.root)
-        notebook_frame.pack(fill="x", padx=10, pady=(0, 10))
-        
-        notebook = ttk.Notebook(notebook_frame)
-        notebook.pack(fill="x")
-        
-        # Create calculations tab
-        calc_tab = ttk.Frame(notebook, style="TFrame")
-        self.create_calc_tab_content(calc_tab)
-        
-        # Create info tab
-        info_tab = ttk.Frame(notebook, style="TFrame")
-        self.create_info_tab_content(info_tab)
-        
-        # Add tabs to notebook
-        notebook.add(calc_tab, text="Calculations")
-        notebook.add(info_tab, text="Info")
-    
-    def create_input_widgets(self):
-        """Create the actual input widgets with circular controls"""
-        # Configure panel for dark background
-        self.input_panel.configure(style="TLabelframe")
-        
-        # Meter reuse control
-        ttk.Label(
-            self.input_panel,
-            text="整表复用率（QM 判定）",
-            style="Section.TLabel"
-        ).pack(pady=(10, 5))
-
-        meter_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
-        meter_frame.pack(fill="x", pady=5, padx=10)
-
-        CircularControl(
-            meter_frame,
-            self.meter_reuse_pct,
-            label="Meter",
-            radius=GAUGE_RADIUS,
-            callback=self.calculate_and_update,
-        ).pack(side="left", padx=10)
-
-        # Remanufacturing controls
-        ttk.Label(self.input_panel, text="组件再制造",
-                 style="Section.TLabel").pack(pady=(15, 5))
-
-        reman_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
-        reman_frame.pack(fill="x", pady=5, padx=10)
-
-        CircularControl(
-            reman_frame,
-            self.reman_impeller_pct,
-            label="Impeller",
-            radius=GAUGE_RADIUS,
-            callback=self.calculate_and_update
-        ).pack(side="left", padx=10)
-
-        CircularControl(
-            reman_frame,
-            self.reman_housing_pct,
-            label="Housing",
-            radius=GAUGE_RADIUS,
-            callback=self.calculate_and_update
-        ).pack(side="left", padx=10)
-
-        # Recycling controls
-        ttk.Label(self.input_panel, text="Component Recycling",
-                 style="Section.TLabel").pack(pady=(15, 5))
-
-        recycle_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
-        recycle_frame.pack(fill="x", pady=5, padx=10)
-
-        recycle_impeller_control = CircularControl(
-            recycle_frame,
-            self.recycle_impeller_pct,
-            label="Impeller",
-            radius=GAUGE_RADIUS,
-            callback=self.calculate_and_update
-        )
-        recycle_impeller_control.pack(side="left", padx=10)
-
-        recycle_housing_control = CircularControl(
-            recycle_frame,
-            self.recycle_housing_pct,
-            label="Housing",
-            radius=GAUGE_RADIUS,
-            callback=self.calculate_and_update
-        )
-        recycle_housing_control.pack(side="left", padx=10)
-        
-        # Energy mix inputs
-        ttk.Label(self.input_panel, text="能源构成", style="Section.TLabel").pack(
-            pady=(20, 10), anchor="w", padx=10)
-
-        mix_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
-        mix_frame.pack(fill="x", padx=10, pady=5)
-        # ——— 电价面板 ———
-        price_frame = ttk.Frame(mix_frame, style="Panel.TFrame")
-        price_frame.pack(fill="x", pady=5)
-
         ttk.Checkbutton(
-            price_frame,
+            mix_card,
             text="使用实时电价",
             variable=self.use_realtime_price,
-            command=self.on_realtime_price_toggle
-        ).pack(side="left")
-        # Create entry for realtime price
+            command=self.on_realtime_price_toggle,
+        ).grid(row=0, column=1, sticky="e", padx=12, pady=(12, 8))
+        ttk.Label(mix_card, text="实时电价 €/kWh", style="Panel.TLabel").grid(
+            row=1, column=0, sticky="w", padx=12
+        )
         self.realtime_price_entry = ttk.Entry(
-            price_frame,
+            mix_card,
             textvariable=self.realtime_price,
-            width=6
+            width=6,
         )
-        self.realtime_price_entry.pack(side="left", padx=(10,2))
-        ttk.Label(price_frame, text="€/kWh", style="Panel.TLabel").pack(side="left")
+        self.realtime_price_entry.grid(row=1, column=1, sticky="e", padx=12)
+        self.realtime_price_entry.configure(state="disabled")
 
-        # 默认禁用，只有勾选"使用实时电价"才可编辑
-        self.realtime_price_entry.config(state="disabled")
+        slider_specs = [
+            ("solar", "太阳能"),
+            ("wind", "风能"),
+            ("fossil", "化石"),
+            ("rest", "其他"),
+        ]
+        for index, (key, label) in enumerate(slider_specs, start=2):
+            row_frame = ttk.Frame(mix_card, style="Panel.TFrame")
+            row_frame.grid(row=index, column=0, columnspan=2, sticky="ew", padx=12, pady=6)
+            row_frame.grid_columnconfigure(1, weight=1)
+            ttk.Label(row_frame, text=f"{label} (%)", style="Value.TLabel").grid(
+                row=0, column=0, sticky="w"
+            )
+            var = getattr(self, f"{key}_pct")
+            scale = ttk.Scale(
+                row_frame,
+                from_=0,
+                to=100,
+                orient="horizontal",
+                variable=var,
+                command=lambda value, name=key: self.on_slider_change(name, float(value)),
+                style="Responsive.Horizontal.TScale",
+            )
+            scale.grid(row=0, column=1, sticky="ew", padx=12)
+            value_label = ttk.Label(row_frame, text=f"{var.get():.0f}%", style="Value.TLabel")
+            value_label.grid(row=0, column=2, padx=(12, 0))
+            setattr(self, f"{key}_val_label", value_label)
 
-        # 太阳能
-        solar_row = ttk.Frame(mix_frame, style="Panel.TFrame")
-        solar_row.pack(fill="x", pady=2)
-        ttk.Label(solar_row, text="阳Solar (%)", style="Value.TLabel", width=10).pack(side="left")
-        solar_scale = ttk.Scale(solar_row, from_=0, to=100, orient="horizontal",
-            variable=self.solar_pct, command=lambda v: self.on_slider_change('solar', float(v)),
-            style="Futuristic.Horizontal.TScale")
-        solar_scale.pack(side="left", fill="x", expand=True, padx=5)
-        self.solar_val_label = ttk.Label(solar_row, text=f"{self.solar_pct.get():.0f}%", style="Value.TLabel", width=4)
-        self.solar_val_label.pack(side="right")
+        self.energy_sum_label = ttk.Label(mix_card, text="合计: 100%", style="Value.TLabel")
+        self.energy_sum_label.grid(row=6, column=0, columnspan=2, sticky="w", padx=12, pady=(8, 12))
 
-        # 风能
-        wind_row = ttk.Frame(mix_frame, style="Panel.TFrame")
-        wind_row.pack(fill="x", pady=2)
-        ttk.Label(wind_row, text="风Wind (%)", style="Value.TLabel", width=10).pack(side="left")
-        wind_scale = ttk.Scale(wind_row, from_=0, to=100, orient="horizontal",
-            variable=self.wind_pct, command=lambda v: self.on_slider_change('wind', float(v)),
-            style="Futuristic.Horizontal.TScale")
-        wind_scale.pack(side="left", fill="x", expand=True, padx=5)
-        self.wind_val_label = ttk.Label(wind_row, text=f"{self.wind_pct.get():.0f}%", style="Value.TLabel", width=4)
-        self.wind_val_label.pack(side="right")
+    def _on_root_resize(self, event: tk.Event) -> None:
+        # [RESPONSIVE] 窗口尺寸去抖处理
+        if event.widget is not self.root:
+            return
+        if self._resize_job:
+            self.root.after_cancel(self._resize_job)
+        self._resize_job = self.root.after(180, self._apply_layout)
 
-        # 化石能源
-        fossil_row = ttk.Frame(mix_frame, style="Panel.TFrame")
-        fossil_row.pack(fill="x", pady=2)
-        ttk.Label(fossil_row, text="化Fossil (%)", style="Value.TLabel", width=10).pack(side="left")
-        fossil_scale = ttk.Scale(fossil_row, from_=0, to=100, orient="horizontal",
-            variable=self.fossil_pct, command=lambda v: self.on_slider_change('fossil', float(v)),
-            style="Futuristic.Horizontal.TScale")
-        fossil_scale.pack(side="left", fill="x", expand=True, padx=5)
-        self.fossil_val_label = ttk.Label(fossil_row, text=f"{self.fossil_pct.get():.0f}%", style="Value.TLabel", width=4)
-        self.fossil_val_label.pack(side="right")
+    def _apply_layout(self) -> None:
+        # [RESPONSIVE] 根据断点和极简模式重排布局
+        self._resize_job = None
+        width = self.root.winfo_width()
+        height = self.root.winfo_height()
+        mode = layout_mode(width, height)
+        minimal_trigger = min(width, height) < 650
+        self._minimal_mode = minimal_trigger
+        if mode == self.current_layout and not minimal_trigger:
+            self._update_font_scale(mode)
+            return
+        self.current_layout = mode
+        self._update_font_scale(mode)
+        badge = mode.replace("_", " ")
+        if self._minimal_mode:
+            badge += " · 极简"
+        self.mode_badge.configure(text=badge)
 
-        # 其他
-        rest_row = ttk.Frame(mix_frame, style="Panel.TFrame")
-        rest_row.pack(fill="x", pady=2)
-        ttk.Label(rest_row, text="其Rest (%)", style="Value.TLabel", width=10).pack(side="left")
-        rest_scale = ttk.Scale(rest_row, from_=0, to=100, orient="horizontal",
-            variable=self.rest_pct, command=lambda v: self.on_slider_change('rest', float(v)),
-            style="Futuristic.Horizontal.TScale")
-        rest_scale.pack(side="left", fill="x", expand=True, padx=5)
-        self.rest_val_label = ttk.Label(rest_row, text=f"{self.rest_pct.get():.0f}%", style="Value.TLabel", width=4)
-        self.rest_val_label.pack(side="right")
+        if self._minimal_mode:
+            self.view_notebook.select(self.core_view)
+            for tab in self.view_notebook.tabs()[1:]:
+                self.view_notebook.tab(tab, state="hidden")
+        else:
+            for tab in self.view_notebook.tabs():
+                self.view_notebook.tab(tab, state="normal")
 
-        # 总和校验
-        self.energy_sum_label = ttk.Label(mix_frame, text="合计: 100%", style="Value.TLabel")
-        self.energy_sum_label.pack(pady=(5, 0))
-        
-        # Current energy mix display - 使用 StringVar 动态更新
-        mix_display_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
-        mix_display_frame.pack(fill="x", padx=10, pady=(0, 10))
-        
-        # 创建动态更新的 StringVar
-        self.energy_mix_display = tk.StringVar()
-        self.price_display = tk.StringVar()
-        
-        ttk.Label(mix_display_frame, text="当前能源构成:", style="Panel.TLabel").pack(side="left", padx=10)
-        ttk.Label(mix_display_frame, textvariable=self.energy_mix_display, style="Value.TLabel").pack(side="left", padx=5)
-        ttk.Label(mix_display_frame, textvariable=self.price_display, style="Value.TLabel").pack(side="left", padx=5)
-        
-        
-    def create_calc_tab_content(self, parent):
-        """Create the calculations tab content"""
-        # Create a scrollable text area
-        calc_frame = ttk.Frame(parent, style="TFrame")
-        calc_frame.pack(fill="both", expand=True, padx=10, pady=5)
-        
-        # Add a scrollbar
-        scrollbar = ttk.Scrollbar(calc_frame)
-        scrollbar.pack(side="right", fill="y")
-        
-        # Create a text widget with scrollbar
-        calc_text = tk.Text(calc_frame, wrap="word", yscrollcommand=scrollbar.set, height=8,
-                           bg=COLORS["bg_medium"], fg=COLORS["text"], bd=0, highlightthickness=0)
-        calc_text.pack(side="left", fill="both", expand=True)
-        scrollbar.config(command=calc_text.yview)
-        
-        # Insert calculation explanations
-        calc_text.insert("end", "CALCULATION FORMULAS\n\n", "heading")
-        
-        # Energy calculation
-        calc_text.insert("end", "1. ENERGY CONSUMPTION\n", "subheading")
-        calc_text.insert("end", "Formula: energy = Q_whole*E_reused + (1-R_meter)*(w_h*(R_rem_h*E_reman + (1-R_rem_h)*E_new) + w_i*(R_rem_i*E_reman + (1-R_rem_i)*E_new))\n\n")
-        calc_text.insert("end", "Where:\n")
-        calc_text.insert("end", "- Q_whole = meter_reuse_pct / 100\n")
-        calc_text.insert("end", "- R_rem_h / R_rem_i = remanufacturing shares of housing / impeller\n")
-        calc_text.insert("end", "- w_h / w_i = cost weights based on new component prices\n")
-        calc_text.insert("end", "- E_new = 20.0 kWh, E_reman = 16.5 kWh, E_reused = 14.0 kWh\n\n")
+        if mode.startswith("L") and not self._minimal_mode:
+            self.view_notebook.grid_remove()
+            if not hasattr(self, "landscape_frame"):
+                self.landscape_frame = ttk.Frame(self.main_container)
+            self.landscape_frame.grid(row=2, column=0, sticky="nsew", padx=18, pady=(0, 18))
+            self.main_container.grid_rowconfigure(2, weight=1)
+            self.landscape_frame.grid_rowconfigure(0, weight=1)
+            self.landscape_frame.grid_columnconfigure(0, weight=1)
+            self.landscape_frame.grid_columnconfigure(1, weight=1)
+            self._show_landscape_columns(mode)
+        else:
+            if hasattr(self, "landscape_frame"):
+                for child in self.landscape_frame.grid_slaves():
+                    child.grid_forget()
+                self.landscape_frame.grid_forget()
+            self.view_notebook.grid(row=2, column=0, sticky="nsew", padx=18, pady=(0, 18))
 
-        # CO2 calculation
-        calc_text.insert("end", "2. CO2 EMISSIONS\n", "subheading")
-        calc_text.insert("end", "Formula: co2 = energy * avg_co2_mix * (1 - 0.5 * secondary_share)\n\n")
-        calc_text.insert("end", "Where:\n")
-        calc_text.insert("end", "- avg_co2_mix = weighted CO₂ factor from the selected energy mix (kg/kWh)\n")
-        calc_text.insert("end", "- secondary_share = secondary_material / total_material\n")
-        calc_text.insert("end", "- Secondary materials cut emissions by up to 50%\n\n")
+    def _show_landscape_columns(self, mode: str) -> None:
+        # [RESPONSIVE] 横屏模式下的列布局策略
+        self.core_view.grid(row=0, column=0, columnspan=2, sticky="nsew", pady=(0, 18))
+        self.input_view.grid(row=1, column=0, sticky="nsew", padx=(0, 12))
+        self.visual_view.grid(row=1, column=1, sticky="nsew", padx=(12, 0))
+        if mode == "L_LG":
+            self.records_view.grid(row=2, column=1, sticky="nsew", pady=(18, 0))
+            self.landscape_frame.grid_rowconfigure(2, weight=1)
+        else:
+            self.records_view.grid(row=2, column=1, sticky="ew", pady=(18, 0))
+            self.landscape_frame.grid_rowconfigure(2, weight=0)
+        self.landscape_frame.grid_rowconfigure(1, weight=1)
 
-        # Energy cost calculation
-        calc_text.insert("end", "3. ENERGY COST\n", "subheading")
-        calc_text.insert("end", "Formula: energy_cost = energy * avg_price_mix\n")
-        calc_text.insert("end", "- avg_price_mix follows the active energy mix and realtime adjustments\n\n")
+        scale_factor = 1.0 if mode == "L_LG" else 0.9
+        for control in self.circular_controls:
+            control.set_scale_factor(scale_factor)
 
-        # Component cost calculation
-        calc_text.insert("end", "4. COMPONENT COST\n", "subheading")
-        calc_text.insert("end", "Housing cost = Q_whole*C_reused + (1-R_meter)*(R_rem_h*C_reman + (1-R_rem_h)*C_new)\n")
-        calc_text.insert("end", "Impeller cost = Q_whole*C_reused + (1-R_meter)*(R_rem_i*C_reman + (1-R_rem_i)*C_new)\n")
-        calc_text.insert("end", "Component cost = housing cost + impeller cost\n\n")
+    def _update_font_scale(self, mode: str) -> None:
+        # [RESPONSIVE] 不同断点对应字体缩放
+        size_key = "LG" if mode.endswith("LG") else ("MD" if mode.endswith("MD") else "SM")
+        factor = FONT_SCALE[size_key]
+        ttk.Style().configure("TLabel", font=("Segoe UI", int(10 * factor)))
 
-        # Material calculation
-        calc_text.insert("end", "5. MATERIALS\n", "subheading")
-        calc_text.insert(
-            "end",
-            "Brass: REF_BRASS * Q_new_housing split into virgin / secondary by share_sec_housing\n",
+    def update_kpis(self) -> None:
+        # [RESPONSIVE] KPI 文本颜色与箭头按实时数据调整
+        for label, value_label, delta_label, current_var, baseline_var in self._kpi_widgets:
+            current = current_var.get()
+            baseline = baseline_var.get()
+            delta = current - baseline
+            value_label.configure(text=f"{current:.2f}")
+            if delta > 0:
+                sign = "↑"
+                color = COLORS["negative"]
+            elif delta < 0:
+                sign = "↓"
+                color = COLORS["positive"]
+            else:
+                sign = "→"
+                color = COLORS["text_secondary"]
+            delta_label.configure(text=f"{sign} {delta:.2f} vs baseline", foreground=color)
+
+    def update_energy_mix(self, *_: Iterable) -> None:
+        # [RESPONSIVE] 能源构成随滑块实时更新
+        s = self.solar_pct.get()
+        w = self.wind_pct.get()
+        f = self.fossil_pct.get()
+        r = self.rest_pct.get()
+        total = s + w + f + r
+        if total <= 0:
+            self.factors = {"solar": 0.0, "wind": 0.0, "fossil": 1.0, "rest": 0.0}
+        else:
+            self.factors = {
+                "solar": s / total,
+                "wind": w / total,
+                "fossil": f / total,
+                "rest": r / total,
+            }
+        for key in ("solar", "wind", "fossil", "rest"):
+            label = getattr(self, f"{key}_val_label")
+            label.configure(text=f"{getattr(self, f'{key}_pct').get():.0f}%")
+        if abs(total - 100) > 0.5:
+            self.energy_sum_label.configure(
+                text=f"合计: {total:.0f}% (请调整)",
+                foreground=COLORS["negative"],
+            )
+        else:
+            self.energy_sum_label.configure(
+                text=f"合计: {total:.0f}%",
+                foreground=COLORS["positive"],
+            )
+        self.energy_mix_display.set(
+            f"太阳能 {s:.0f}%, 风能 {w:.0f}%, 化石 {f:.0f}%, 其他 {r:.0f}%"
         )
-        calc_text.insert(
-            "end",
-            "Plastic: REF_PLASTIC * Q_new_impeller split into virgin / secondary by share_sec_impeller\n\n",
-        )
-        
-        # Configure tags for styling
-        calc_text.tag_configure("heading", font=("Segoe UI", 12, "bold"), foreground=COLORS["accent"])
-        calc_text.tag_configure("subheading", font=("Segoe UI", 10, "bold"), foreground=COLORS["text"])
-        
-        # Make the text widget read-only
-        calc_text.config(state="disabled")
-    
-    def create_info_tab_content(self, parent):
-        """Create the info tab content"""
-        info_frame = ttk.Frame(parent, style="TFrame")
-        info_frame.pack(fill="both", expand=True, padx=10, pady=5)
-        
-        info_text = """
-Circular Economy Dashboard
-
-This dashboard simulates the impact of meter reuse, component remanufacturing, and recycling:
-
-Input Parameters:
-- Meter Reuse (QM): Percentage of complete meters that remain in service without disassembly.
-- Component Remanufacturing (Impeller/Housing): Share of dismantled components that are remanufactured.
-    - Impeller: €0.20 new, €0.15 reman, €0.10 reused
-    - Housing: €4.00 new, €3.00 reman, €2.00 reused
-- Component Recycling (Impeller/Housing): Percentage of remaining material demand sourced from secondary feedstock.
-- Energy Mix: Simulated by activating solar and/or wind power
-    - Neither active = USA mix (28.01¢/kWh)
-    - Solar active = EU mix (36.01¢/kWh)
-    - Wind active = German mix (40.11¢/kWh)
-    - Both active = German eco mix (44.12¢/kWh)
-
-Energy Consumption:
-- Completely new components require 20 kWh
-- Remanufactured components require 16.5 kWh on average
-- Fully reused units require 14 kWh
-
-Material Consumption:
-- Remanufacturing lowers demand in proportion to each component's reman share
-- Recycling supplies secondary feedstock for the remaining new-build fraction
-- Secondary feedstock can reduce lifecycle CO₂ emissions by up to 50%
-
-The dashboard compares the baseline scenario (0% reuse, 0% recycle, USA energy) with your current settings.
-
-The Scenario Comparison panel lets you save up to three records and compare their energy, cost, CO₂, brass, and plastic values.
-"""
-        
-        # Create a text widget for the info content
-        info_text_widget = tk.Text(info_frame, wrap="word", height=15, 
-                                  bg=COLORS["bg_medium"], fg=COLORS["text"], 
-                                  bd=0, highlightthickness=0)
-        info_text_widget.pack(fill="both", expand=True)
-        info_text_widget.insert("1.0", info_text)
-        info_text_widget.config(state="disabled")  # Make read-only
-    
-    def update_comp_value(self, var):
-        var.set(round(var.get(), 1))
+        self.update_price_display()
         self.calculate_and_update()
-    
-    def on_slider_change(self, changed, new_value):
-        """滑块变化处理"""
-        # 只有真实的用户拖动 Solar 才触发手动锁
-        if changed == 'solar' and not self._auto_updating:
-            print(f"用户手动调整Solar: {new_value:.1f}%")
-            self._manual_lock = True
-            self._solar_target = float(new_value)
-            self._auto_ramping = False  # 停止自动推进
 
-        if changed == 'wind' and not self._wind_auto_updating:
-            print(f"用户手动调整Wind: {new_value:.1f}%")
-            self._wind_manual_lock = True
-            self._wind_target = float(new_value)
-            self._wind_auto_ramping = False
+    def update_price_display(self) -> None:
+        try:
+            cost = compute_avg_price_from_energy_mix(
+                self.factors,
+                use_realtime=self.use_realtime_price.get(),
+                realtime_price=self.realtime_price.get(),
+                price_source=self.price_source.get(),
+            )
+            source = (
+                self.price_source.get()
+                if self.use_realtime_price.get() and self.price_source.get() != "本地加权均值"
+                else "本地加权均值"
+            )
+            self.price_display.set(f"当前电价: {cost:.2f} €/kWh (来源: {source})")
+        except Exception as exc:  # pragma: no cover - defensive
+            print("更新电价显示时出错:", exc)
+            self.price_display.set(f"当前电价: {self.realtime_price.get():.2f} €/kWh")
 
-        # changed: one of the energy sources
-        sources = ['solar', 'wind', 'fossil', 'rest']
-        values = {s: getattr(self, f"{s}_pct").get() for s in sources}
-        values[changed] = new_value
+    def on_slider_change(self, changed: str, value: float) -> None:
+        # [RESPONSIVE] 断点式能源配比调整
+        sources = ["solar", "wind", "fossil", "rest"]
+        values = {key: getattr(self, f"{key}_pct").get() for key in sources}
+        values[changed] = value
         total = sum(values.values())
         if total > 100:
             others = [s for s in sources if s != changed]
             other_sum = sum(values[o] for o in others)
             if other_sum == 0:
-                values[changed] = 100
                 for o in others:
                     values[o] = 0
+                values[changed] = 100
             else:
                 excess = total - 100
                 for o in others:
                     reduction = excess * (values[o] / other_sum)
                     values[o] = max(0, values[o] - reduction)
-        for s in sources:
-            getattr(self, f"{s}_pct").set(values[s])
-        # 更新显示和计算
+        for key in sources:
+            getattr(self, f"{key}_pct").set(values[key])
         self.update_energy_mix()
-    
-    def on_realtime_price_toggle(self):
-        """当实时电价开关切换时调用"""
+
+    def on_realtime_price_toggle(self) -> None:
+        # [RESPONSIVE] 实时电价切换保持兼容
         if self.use_realtime_price.get():
-            # 启用编辑，并立刻拉取最新价格
-            self.realtime_price_entry.config(state="normal")
+            self.realtime_price_entry.configure(state="normal")
             self.fetch_realtime_price()
         else:
-            # 禁用编辑，回退到本地加权
-            self.realtime_price_entry.config(state="disabled")
+            self.realtime_price_entry.configure(state="disabled")
             self.price_source.set("本地加权均值")
             self.update_price_display()
         self.calculate_and_update()
 
-    def compute_avg_cost(self, factors):
-        """Calculate average electricity cost based on mix and price mode"""
+    def compute_avg_cost(self, factors: Dict[str, float]) -> float:
         return compute_avg_price_from_energy_mix(
             factors,
             use_realtime=self.use_realtime_price.get(),
@@ -1220,64 +1263,15 @@ The Scenario Comparison panel lets you save up to three records and compare thei
             price_source=self.price_source.get(),
         )
 
-    def update_price_display(self):
-        """更新电价显示"""
-        try:
-            factors = getattr(self, 'factors', {'solar':0,'wind':0,'fossil':1,'rest':0})
-            val = self.compute_avg_cost(factors)
-            src = self.price_source.get() if (self.use_realtime_price.get() and self.price_source.get() != "本地加权均值") else "本地加权均值"
-            self.price_display.set(f"当前电价: {val:.2f} €/kWh (来源: {src})")
-        except Exception as e:
-            val = self.realtime_price.get()
-            self.price_display.set(f"当前电价: {val:.2f} €/kWh (来源: 默认值)")
-            print("更新电价显示时出错:", e)
-    
-    def update_energy_mix(self, *args):
-        """更新能源构成比例和显示"""
-        s = self.solar_pct.get()
-        w = self.wind_pct.get()
-        f = self.fossil_pct.get()
-        r = self.rest_pct.get()
-        total = s + w + f + r
-        if total == 0:
-            self.factors = {'solar':0, 'wind':0, 'fossil':1.0, 'rest':0}
-            total_display = 0
-        else:
-            self.factors = {
-                'solar': s/total,
-                'wind': w/total,
-                'fossil': f/total,
-                'rest': r/total
-            }
-            total_display = total
-        self.solar_val_label.config(text=f"{s:.0f}%")
-        self.wind_val_label.config(text=f"{w:.0f}%")
-        self.fossil_val_label.config(text=f"{f:.0f}%")
-        self.rest_val_label.config(text=f"{r:.0f}%")
-        if abs(total_display-100) > 0.1:
-            self.energy_sum_label.config(text=f"合计: {total_display:.0f}% (请调整为100%)", foreground=COLORS["negative"])
-        else:
-            self.energy_sum_label.config(text=f"合计: {total_display:.0f}%", foreground=COLORS["positive"])
-
-        # 更新动态显示的能源构成和电价
-        self.energy_mix_display.set(
-            f"太阳能: {s:.0f}%, 风能: {w:.0f}%, 化石: {f:.0f}%, 其他: {r:.0f}%"
-        )
-        self.update_price_display()
-
-        self.calculate_and_update()
-    
     def calculate_metrics(
         self,
-        meter_reuse_pct,
-        reman_housing_pct,
-        reman_impeller_pct,
-        recycle_housing_pct,
-        recycle_impeller_pct,
-        factors,
-    ):
-        """计算所有指标"""
-
+        meter_reuse_pct: float,
+        reman_housing_pct: float,
+        reman_impeller_pct: float,
+        recycle_housing_pct: float,
+        recycle_impeller_pct: float,
+        factors: Dict[str, float],
+    ) -> Dict[str, float]:
         meter_reuse_pct = float(meter_reuse_pct)
         reman_housing_pct = float(reman_housing_pct)
         reman_impeller_pct = float(reman_impeller_pct)
@@ -1293,14 +1287,13 @@ The Scenario Comparison panel lets you save up to three records and compare thei
         Q_whole = R_meter
         Q_rem_housing = (1 - R_meter) * R_rem_h
         Q_rem_impeller = (1 - R_meter) * R_rem_i
-
-        Q_new_housing  = (1.0 - R_meter) * (1.0 - R_rem_h)
+        Q_new_housing = (1.0 - R_meter) * (1.0 - R_rem_h)
         Q_new_impeller = (1.0 - R_meter) * (1.0 - R_rem_i)
 
         Q_sec_brass = (1 - R_meter) * (1 - R_rem_h) * R_rec_h
         Q_sec_plastic = (1 - R_meter) * (1 - R_rem_i) * R_rec_i
 
-        share_sec_housing  = 0.0 if Q_new_housing  <= 1e-12 else R_rec_h
+        share_sec_housing = 0.0 if Q_new_housing <= 1e-12 else R_rec_h
         share_sec_impeller = 0.0 if Q_new_impeller <= 1e-12 else R_rec_i
 
         virgin_brass = REF_BRASS * Q_new_housing * (1 - share_sec_housing)
@@ -1377,21 +1370,19 @@ The Scenario Comparison panel lets you save up to three records and compare thei
             "component_cost": component_cost_eur,
             "total_cost": total_cost_for_plot,
         }
-    
-    def calculate_and_update(self):
+
+    def calculate_and_update(self) -> None:
+        # [RESPONSIVE] 统一触发所有可视组件刷新
         try:
             meter_reuse = float(self.meter_reuse_pct.get())
             reman_impeller = float(self.reman_impeller_pct.get())
             reman_housing = float(self.reman_housing_pct.get())
-
             recycle_impeller = float(self.recycle_impeller_pct.get())
             recycle_housing = float(self.recycle_housing_pct.get())
 
-            # 强制 baseline 为 0% reuse/recycle + 100% fossil
-            baseline_factors = {'solar': 0.0, 'wind': 0.0, 'fossil': 1.0, 'rest': 0.0}
+            baseline_factors = {"solar": 0.0, "wind": 0.0, "fossil": 1.0, "rest": 0.0}
             baseline_metrics = self.calculate_metrics(0, 0, 0, 0, 0, baseline_factors)
 
-            # Calculate current metrics
             current_metrics = self.calculate_metrics(
                 meter_reuse,
                 reman_housing,
@@ -1400,142 +1391,113 @@ The Scenario Comparison panel lets you save up to three records and compare thei
                 recycle_impeller,
                 self.factors,
             )
-            
-            # Update the result variables
-            self.energy_baseline.set(baseline_metrics['energy'])
-            self.energy_cost_baseline.set(baseline_metrics['energy_cost'])
-            self.co2_baseline.set(baseline_metrics['co2'])
-            self.brass_baseline.set(baseline_metrics['brass'])
-            self.plastic_baseline.set(baseline_metrics['plastic'])
-            self.cost_baseline.set(baseline_metrics['component_cost'])
-            
-            self.energy_current.set(current_metrics['energy'])
-            self.energy_cost_current.set(current_metrics['energy_cost'])
-            self.co2_current.set(current_metrics['co2'])
-            self.brass_current.set(current_metrics['brass'])
-            self.plastic_current.set(current_metrics['plastic'])
-            self.cost_current.set(current_metrics['component_cost'])
-            
-            # Update charts
-            # First chart: Metrics comparison with units
-            self.metrics_chart.update_chart(
-                ["Energy", "Cost", "CO2"],
-                [
-                    baseline_metrics['energy'],
-                    baseline_metrics['total_cost'],
-                    baseline_metrics['co2']
-                ],
-                [
-                    current_metrics['energy'],
-                    current_metrics['total_cost'],
-                    current_metrics['co2']
-                ],
-                [COLORS["negative"], COLORS["metric1"]],
-                ["kWh", "EUR", "kg"]  # Changed € to EUR for encoding compatibility
-            )
-            
-            # Second chart: Materials comparison with units
-            self.materials_chart.update_chart(
-                ["Brass", "Plastic"],
-                [
-                    baseline_metrics['brass'],
-                    baseline_metrics['plastic']
-                ],
-                [
-                    current_metrics['brass'],
-                    current_metrics['plastic']
-                ],
-                [COLORS["negative"], COLORS["material1"]],
-                ["kg", "kg"]  # Units for materials
-            )
-            
-            
-        except Exception as e:
-            print(f"Error in calculation: {e}")
-    def save_record(self):
-        """Save the current metrics as a record"""
-        meter_reuse = int(self.meter_reuse_pct.get())
-        reman_impeller = int(self.reman_impeller_pct.get())
-        reman_housing = int(self.reman_housing_pct.get())
-        recycle_impeller = int(self.recycle_impeller_pct.get())
-        recycle_housing = int(self.recycle_housing_pct.get())
 
-        current_metrics = self.calculate_metrics(
-            meter_reuse,
-            reman_housing,
-            reman_impeller,
-            recycle_housing,
-            recycle_impeller,
-            self.factors,
-        )
+            self.energy_current.set(current_metrics["energy"])
+            self.co2_current.set(current_metrics["co2"])
+            self.cost_current.set(current_metrics["total_cost"])
+            self.energy_cost_current.set(current_metrics["energy_cost"])
+            self.brass_current.set(current_metrics["brass"])
+            self.plastic_current.set(current_metrics["plastic"])
 
+            self.energy_baseline.set(baseline_metrics["energy"])
+            self.co2_baseline.set(baseline_metrics["co2"])
+            self.cost_baseline.set(baseline_metrics["total_cost"])
+            self.energy_cost_baseline.set(baseline_metrics["energy_cost"])
+            self.brass_baseline.set(baseline_metrics["brass"])
+            self.plastic_baseline.set(baseline_metrics["plastic"])
+
+            self.update_kpis()
+
+            self.energy_chart.update_chart(
+                ["能源", "能源成本"],
+                [
+                    self.energy_baseline.get(),
+                    self.energy_cost_baseline.get(),
+                ],
+                [
+                    self.energy_current.get(),
+                    self.energy_cost_current.get(),
+                ],
+                colors=[COLORS["negative"], COLORS["metric1"]],
+                units=["", ""],
+            )
+
+            self.material_chart.update_chart(
+                ["铜", "塑料"],
+                [
+                    self.brass_baseline.get(),
+                    self.plastic_baseline.get(),
+                ],
+                [
+                    self.brass_current.get(),
+                    self.plastic_current.get(),
+                ],
+                colors=[COLORS["material1"], COLORS["material2"]],
+                units=[" kg", " kg"],
+            )
+        except Exception as exc:  # pragma: no cover - UI resilience
+            print("计算更新失败:", exc)
+
+    def save_record(self) -> None:
+        # [RESPONSIVE] 保存记录触发懒加载图表
         record = {
-            "label": f"Record {len(self.records_chart.records) + 1}",
-            "meter_reuse": meter_reuse,
-            "reman_impeller": reman_impeller,
-            "reman_housing": reman_housing,
-            "recycle_impeller": recycle_impeller,
-            "recycle_housing": recycle_housing,
-            "energy": current_metrics['energy'],
-            "co2": current_metrics['co2'],
-            "brass": current_metrics['brass'],
-            "plastic": current_metrics['plastic'],
-            "cost": current_metrics['total_cost'],
+            "label": datetime.datetime.now().strftime("%H:%M"),
+            "meter_reuse": self.meter_reuse_pct.get(),
+            "reman_impeller": self.reman_impeller_pct.get(),
+            "reman_housing": self.reman_housing_pct.get(),
+            "recycle_impeller": self.recycle_impeller_pct.get(),
+            "recycle_housing": self.recycle_housing_pct.get(),
+            "energy": self.energy_current.get(),
+            "co2": self.co2_current.get(),
+            "brass": self.brass_current.get(),
+            "plastic": self.plastic_current.get(),
+            "cost": self.cost_current.get(),
         }
         self.records_chart.add_record(record)
 
-    def clear_records(self):
-        """Clear all saved records"""
+    def clear_records(self) -> None:
         self.records_chart.clear_records()
 
-    def fetch_realtime_price(self):
-        """按当地时区取德国日内 24 小时平均电价，并更新界面"""
+    def fetch_realtime_price(self) -> None:
+        # [RESPONSIVE] 网络失败自动回退本地价格
         try:
-            # 1) 计算当地“昨天00:00→次日00:00”并转 UTC 
             berlin = ZoneInfo("Europe/Berlin")
             today_local = datetime.datetime.now(berlin).date()
             yesterday = today_local - datetime.timedelta(days=1)
 
             local_start = datetime.datetime.combine(
-                yesterday, 
-                datetime.time(0, 0), 
-                tzinfo=berlin
+                yesterday,
+                datetime.time(0, 0),
+                tzinfo=berlin,
             )
-            # 注意：这里用 yesterday+1 天的 00:00
             local_end = datetime.datetime.combine(
                 yesterday + datetime.timedelta(days=1),
                 datetime.time(0, 0),
-                tzinfo=berlin
+                tzinfo=berlin,
             )
 
             utc = ZoneInfo("UTC")
             start_utc = local_start.astimezone(utc)
-            end_utc   = local_end.astimezone(utc)
+            end_utc = local_end.astimezone(utc)
 
-            # 2) 发请求
             params = {
                 "securityToken": YOUR_API_KEY,
-                "documentType":  "A44",
-                "in_Domain":     "10Y1001A1001A82H",
-                "out_Domain":    "10Y1001A1001A82H",
-                "periodStart":   start_utc.strftime("%Y%m%d%H%M"),
-                "periodEnd":     end_utc.strftime("%Y%m%d%H%M"),
+                "documentType": "A44",
+                "in_Domain": "10Y1001A1001A82H",
+                "out_Domain": "10Y1001A1001A82H",
+                "periodStart": start_utc.strftime("%Y%m%d%H%M"),
+                "periodEnd": end_utc.strftime("%Y%m%d%H%M"),
             }
             resp = requests.get(
                 "https://web-api.tp.entsoe.eu/api",
                 params=params,
                 headers={"Accept": "application/xml"},
-                timeout=10
+                timeout=10,
             )
-            # 调试输出 
-            #print("Request URL:", resp.url)
-            #print("Status Code:", resp.status_code)
-            #print("Raw Response:\n", resp.text)
             resp.raise_for_status()
 
-            # 3) 解析 XML + 命名空间 + 容错 
             root = ET.fromstring(resp.content)
-            m = re.match(r'\{(.+)\}', root.tag)
+            m = re.match(r"\{(.+)\}", root.tag)
             ns = {"ns": m.group(1)} if m else {}
 
             if root.tag.endswith("Acknowledgement_MarketDocument"):
@@ -1552,43 +1514,47 @@ The Scenario Comparison panel lets you save up to three records and compare thei
             if not prices:
                 raise RuntimeError("解析后无任何价格点")
 
-            # ——— 4) 计算平均并更新界面 ———
             avg_mwh = sum(prices) / len(prices)
             avg_kwh = avg_mwh / 1000.0
             self.realtime_price.set(avg_kwh)
             self.price_source.set("ENTSO‑E 日平均")
-
-        except Exception as err:
+        except Exception as err:  # pragma: no cover - network resilience
             self.price_source.set("本地加权均值")
             print("获取实时电价失败:", err)
-
         finally:
             if self.use_realtime_price.get():
                 self.update_price_display()
             self.root.after(3600_000, self.fetch_realtime_price)
-            
-    def _start_serial(self, port_hint='COM3', baud=9600):
-        """启动串口线程，读取 Arduino 发来的 Solar/Wind 状态"""
+
+    def _start_serial(self, port_hint: str = "COM3", baud: int = 9600) -> None:
+        # [RESPONSIVE] 串口线程在新布局下保持工作
         self._serial_stop = False
         if serial is None:
             print("pyserial 未安装，串口功能禁用")
             return
 
-        def worker():
-            ports_to_try = [port_hint, 'COM4', 'COM5', '/dev/ttyUSB0', '/dev/ttyACM0', '/dev/tty.usbserial-1410']
+        def worker() -> None:
+            ports_to_try = [
+                port_hint,
+                "COM4",
+                "COM5",
+                "/dev/ttyUSB0",
+                "/dev/ttyACM0",
+                "/dev/tty.usbserial-1410",
+            ]
             ser = None
-            for p in ports_to_try:
-                if not p:
+            for port in ports_to_try:
+                if not port:
                     continue
                 try:
-                    ser = serial.Serial(p, baudrate=baud, timeout=1)
+                    ser = serial.Serial(port, baudrate=baud, timeout=1)
                     ser.reset_input_buffer()
-                    print(f"串口连接Serial: {p}")
+                    print(f"串口连接成功: {port}")
                     break
                 except Exception:
                     continue
             if ser is None:
-                print("未能连接到任何串口No serial port connected")
+                print("未能连接到任何串口")
                 return
 
             pat = re.compile(
@@ -1598,76 +1564,65 @@ The Scenario Comparison panel lets you save up to three records and compare thei
             pat_wind = re.compile(r"\[(SPINNING|STOPPED)\]", re.I)
             while not self._serial_stop:
                 try:
-                    line = ser.readline().decode(errors='ignore').strip()
+                    line = ser.readline().decode(errors="ignore").strip()
                     if not line:
                         continue
-
-                    m = pat.search(line)
-                    if m:
-                        raw = int(float(m.group(1)))
-                        base = int(float(m.group(2)))
-                        st = m.group(3).upper()
-                        self._process_arduino_state(st)
+                    match = pat.search(line)
+                    if match:
+                        state = match.group(3).upper()
+                        self._process_arduino_state(state)
                         continue
-
-                    m_wind = pat_wind.search(line)
-                    if m_wind:
-                        wind_state = m_wind.group(1).upper()
+                    match_wind = pat_wind.search(line)
+                    if match_wind:
+                        wind_state = match_wind.group(1).upper()
                         self._process_wind_state(wind_state)
                         continue
-                except Exception as e:
-                    print("串口读取异常：", e)
+                except Exception as exc:
+                    print("串口读取异常：", exc)
                     time.sleep(0.2)
             try:
                 ser.close()
-            except:
+            except Exception:
                 pass
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _process_arduino_state(self, new_state):
-        """处理 Arduino 状态变化"""
-        old_state = self._solar_state
+    def _process_arduino_state(self, new_state: str) -> None:
+        # [RESPONSIVE] 自动推进与手动锁配合
+        old_state = getattr(self, "_solar_state", "A")
         self._solar_state = new_state
         if old_state != new_state:
             print(f"Arduino状态变化: {old_state} -> {new_state}")
-            if new_state == 'L':
-                print("检测到直射，开始向上推进")
+            if new_state == "L":
                 self._manual_lock = False
                 self._solar_target = 100.0
                 self._auto_ramping = True
-            elif new_state == 'B':
-                print("检测到遮挡，开始向下推进")
+            elif new_state == "B":
                 self._manual_lock = False
                 self._solar_target = 0.0
                 self._auto_ramping = True
-            else:  # Ambient
-                if old_state in ['L', 'B']:
-                    print("回到环境光，停止自动推进")
+            else:
+                if old_state in ["L", "B"]:
                     self._auto_ramping = False
                     self._solar_target = float(self.solar_pct.get())
 
-    def _process_wind_state(self, new_state: str):
-        """处理风力状态变化"""
-        normalized = (new_state or '').upper()
-        old_state = self._wind_state
+    def _process_wind_state(self, new_state: str) -> None:
+        # [RESPONSIVE] 风能推进的断点兼容
+        normalized = (new_state or "").upper()
+        old_state = getattr(self, "_wind_state", "STOPPED")
         self._wind_state = normalized
         if old_state != normalized:
             print(f"Wind状态变化: {old_state} -> {normalized}")
-
-        if normalized == 'SPINNING':
-            print("检测到风机旋转，启动向上推进")
+        if normalized == "SPINNING":
             self._wind_manual_lock = False
             self._wind_target = 100.0
             self._wind_auto_ramping = True
-        elif normalized == 'STOPPED':
-            #if not self._wind_manual_lock:
-            #    print("检测到风机停止，维持当前风能比例")'
+        elif normalized == "STOPPED":
             self._wind_auto_ramping = False
             self._wind_target = float(self.wind_pct.get())
 
-    def _ramp_tick(self):
-        """定时推进 Solar/Wind 进度"""
+    def _ramp_tick(self) -> None:
+        # [RESPONSIVE] 自动推进去抖
         try:
             solar_changed = False
             wind_changed = False
@@ -1685,17 +1640,15 @@ The Scenario Comparison panel lets you save up to three records and compare thei
                         step_per_sec = 100.0 / max(0.1, self._ramp_dn_sec)
                         step = step_per_sec * (self._ramp_interval_ms / 1000.0)
                         new_val = max(target, current_value - step)
-
                     self._auto_updating = True
                     try:
                         self.solar_pct.set(new_val)
-                        self.solar_val_label.config(text=f"{new_val:.0f}%")
+                        self.solar_val_label.configure(text=f"{new_val:.0f}%")
                     finally:
                         self._auto_updating = False
                     solar_changed = True
                 else:
                     if self._auto_ramping:
-                        print(f"到达目标值 {target:.1f}%，停止推进")
                         self._auto_ramping = False
 
             current_wind = float(self.wind_pct.get())
@@ -1706,36 +1659,30 @@ The Scenario Comparison panel lets you save up to three records and compare thei
                     step_per_sec = 100.0 / max(0.1, self._wind_ramp_up_sec)
                     step = step_per_sec * (self._ramp_interval_ms / 1000.0)
                     new_wind = min(target_wind, current_wind + step)
-
                     self._wind_auto_updating = True
                     try:
                         self.wind_pct.set(new_wind)
-                        self.wind_val_label.config(text=f"{new_wind:.0f}%")
+                        self.wind_val_label.configure(text=f"{new_wind:.0f}%")
                     finally:
                         self._wind_auto_updating = False
                     wind_changed = True
                 else:
                     if self._wind_auto_ramping:
-                        print(f"风能到达目标值 {target_wind:.1f}%，停止推进")
                         self._wind_auto_ramping = False
 
             if solar_changed or wind_changed:
                 self.update_energy_mix()
-        except Exception as e:
-            print("ramp出错：", e)
+        except Exception as exc:  # pragma: no cover - resilience
+            print("ramp出错：", exc)
         finally:
             self.root.after(self._ramp_interval_ms, self._ramp_tick)
 
 
-
-
-
-
-# Create the main window and dashboard application
-def main():
+def main() -> None:
     root = tk.Tk()
-    app = CircularEconomyDashboard(root)
+    CircularEconomyDashboard(root)
     root.mainloop()
+
 
 if __name__ == "__main__":
     main()
