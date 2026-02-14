@@ -263,9 +263,19 @@ class FuturisticStyle:
         # Configure progressbar
         style.configure("TProgressbar", background=COLORS["accent"], troughcolor=COLORS["bg_light"])
 
-        # Create blue accent button style
-        style.configure("Accent.TButton", background=COLORS["bg_light"], foreground=COLORS["text"])
-        style.map("Accent.TButton", background=[("active", COLORS["accent"])])
+        # Create blue accent button style matching cyber theme
+        style.configure(
+            "Accent.TButton",
+            background=COLORS["bg_light"],
+            foreground=COLORS["text"],
+            font=("Segoe UI", 9, "bold"),
+            borderwidth=0,
+        )
+        style.map(
+            "Accent.TButton",
+            background=[("active", COLORS["accent"])],
+            foreground=[("active", COLORS["text"])],
+        )
         
         # Style for LabelFrame
         style.configure("TLabelframe", background=COLORS["bg_medium"], foreground=COLORS["text"])
@@ -740,11 +750,19 @@ class CircularEconomyDashboard:
         control_frame = ttk.Frame(livegraph_panel)
         control_frame.pack(fill="x", padx=10, pady=(0, 10))
 
-        ttk.Button(control_frame, text="Save Record",
-                   command=self.save_record, style="Accent.TButton").pack(side="left", padx=(0, 10))
+        ttk.Button(
+            control_frame,
+            text="Save Record",
+            command=self.save_record,
+            style="Accent.TButton",
+        ).pack(side="left", padx=(0, 10))
 
-        ttk.Button(control_frame, text="Clear All Records",
-                   command=self.clear_records).pack(side="left")
+        ttk.Button(
+            control_frame,
+            text="Clear All Records",
+            command=self.clear_records,
+            style="Accent.TButton",
+        ).pack(side="left")
         
         self.records_chart = RecordBarChart(livegraph_panel, width=1160, height=250)
         self.records_chart.pack(fill="both", expand=True, padx=10, pady=10)
