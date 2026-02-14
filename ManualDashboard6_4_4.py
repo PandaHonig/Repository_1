@@ -434,17 +434,25 @@ class FuturisticTooltip:
 
     - 自动根据鼠标位置放置气泡
     - 避免超出屏幕边界（左右/上下都会夹紧）
+    - 触控/拖动时自动取消显示
     """
 
-    def __init__(self, widget, text, wraplength=260):
+    def __init__(self, widget, text, wraplength=260, delay_ms=650):
         self.widget = widget
         self.text = text
         self.wraplength = wraplength
+        self.delay_ms = delay_ms
         self.tipwindow = None
+        self._after_id = None
+        self._enter_event = None
+        self._enter_coords = None
+        self._global_bind_id = None
 
-        widget.bind("<Enter>", self._show)
-        widget.bind("<Leave>", self._hide)
-        widget.bind("<Motion>", self._move)
+        widget.bind("<Enter>", self._schedule_show, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+        widget.bind("<Motion>", self._move, add="+")
+        widget.bind("<ButtonPress-1>", self._cancel_and_hide, add="+")
+        widget.bind("<B1-Motion>", self._cancel_and_hide, add="+")
 
     def _clamp_to_screen(self, x, y, tw):
         """根据屏幕和 tooltip 尺寸，把 (x,y) 夹紧在可见范围内"""
@@ -476,31 +484,50 @@ class FuturisticTooltip:
 
         return new_x, new_y
 
+    def _schedule_show(self, event=None):
+        self._enter_event = event
+        if event is not None:
+            self._enter_coords = (event.x, event.y)
+        else:
+            self._enter_coords = None
+        self._cancel_after()
+        if not self.text:
+            return
+        self._after_id = self.widget.after(self.delay_ms, lambda: self._show(event))
+
     def _show(self, event=None):
-        if self.tipwindow or not self.text:
+        self._after_id = None
+        if not self.text:
             return
 
-        self.tipwindow = tw = tk.Toplevel(self.widget)
-        tw.wm_overrideredirect(True)
+        if self.tipwindow is None:
+            self.tipwindow = tw = tk.Toplevel(self.widget)
+            tw.wm_overrideredirect(True)
 
-        label = tk.Label(
-            tw,
-            text=self.text,
-            justify="left",
-            background=COLORS["bg_medium"],
-            foreground=COLORS["text"],
-            relief="solid",
-            borderwidth=1,
-            font=("Segoe UI", 8),
-            wraplength=self.wraplength,
-        )
-        label.config(highlightthickness=1, highlightbackground=COLORS["accent"])
-        label.pack(ipadx=4, ipady=3)
+            label = tk.Label(
+                tw,
+                text=self.text,
+                justify="left",
+                background=COLORS["bg_medium"],
+                foreground=COLORS["text"],
+                relief="solid",
+                borderwidth=1,
+                font=("Segoe UI", 8),
+                wraplength=self.wraplength,
+            )
+            label.config(highlightthickness=1, highlightbackground=COLORS["accent"])
+            label.pack(ipadx=4, ipady=3)
+            self._bind_global_hide()
+        else:
+            tw = self.tipwindow
 
-        # 初始位置：鼠标右下方，如果没有 event 就用控件右下方
-        if event is not None:
-            base_x = self.widget.winfo_rootx() + event.x + 16
-            base_y = self.widget.winfo_rooty() + event.y + 16
+        ref_event = event or self._enter_event
+        if ref_event is not None:
+            base_x = self.widget.winfo_rootx() + ref_event.x + 16
+            base_y = self.widget.winfo_rooty() + ref_event.y + 16
+        elif self._enter_coords is not None:
+            base_x = self.widget.winfo_rootx() + self._enter_coords[0] + 16
+            base_y = self.widget.winfo_rooty() + self._enter_coords[1] + 16
         else:
             base_x = self.widget.winfo_rootx() + 16
             base_y = self.widget.winfo_rooty() + self.widget.winfo_height() + 8
@@ -520,10 +547,32 @@ class FuturisticTooltip:
         x, y = self._clamp_to_screen(base_x, base_y, tw)
         tw.wm_geometry(f"+{int(x)}+{int(y)}")
 
+    def _cancel_after(self):
+        if self._after_id is not None:
+            self.widget.after_cancel(self._after_id)
+            self._after_id = None
+
+    def _cancel_and_hide(self, event=None):
+        self._cancel_after()
+        self._hide(event)
+
+    def _bind_global_hide(self):
+        if self._global_bind_id:
+            return
+        toplevel = self.widget.winfo_toplevel()
+        self._global_bind_id = toplevel.bind("<ButtonPress-1>", self._hide, add="+")
+
     def _hide(self, event=None):
+        self._cancel_after()
         if self.tipwindow is not None:
             self.tipwindow.destroy()
             self.tipwindow = None
+        if self._global_bind_id:
+            toplevel = self.widget.winfo_toplevel()
+            toplevel.unbind("<ButtonPress-1>", self._global_bind_id)
+            self._global_bind_id = None
+        self._enter_event = None
+        self._enter_coords = None
 class FuturisticChart(tk.Canvas):
     """A futuristic styled chart"""
     
@@ -1019,26 +1068,34 @@ class CircularEconomyDashboard:
 
     def create_input_panel(self):
         """Create the input parameters panel"""
-        input_panel = ttk.LabelFrame(self.input_column, text="Eingangsparameter")
+        input_panel = ttk.LabelFrame(self.input_column)
         input_panel.pack(fill="both", expand=True)
 
         # We'll add the actual widgets later
         self.input_panel = input_panel
-
-        FuturisticTooltip(
+        input_title = ttk.Label(
             input_panel,
+            text="Eingangsparameter",
+            style="Section.TLabel",
+        )
+        input_panel.configure(labelwidget=input_title)
+        FuturisticTooltip(
+            input_title,
             "Eingangsparameter des Demonstrators: Zirkularitätsquoten (Reuse, Remanufacturing, "
             "Recycling) und Energiemix für die Berechnung von Energie, CO₂, Kosten und Materialbedarf."
         )
-    
+
     def create_visualization_panels(self):
         """Create visualization panels for metrics and materials"""
         # Create metrics panel
-        metrics_panel = ttk.LabelFrame(self.viz_column, text="Kennzahlenvergleich", style="TLabelframe")
+        metrics_panel = ttk.LabelFrame(self.viz_column, style="TLabelframe")
         metrics_panel.pack(fill="x", expand=False, pady=(0, PAD_Y_PANEL))
 
+        metrics_title = ttk.Label(metrics_panel, text="Kennzahlenvergleich", style="Section.TLabel")
+        metrics_panel.configure(labelwidget=metrics_title)
+
         FuturisticTooltip(
-            metrics_panel,
+            metrics_title,
             "Vergleich der Baseline (rot) mit der aktuellen Einstellung (blau) "
             "für Energieverbrauch, Gesamtkosten (Komponenten + Energie) "
             "und CO₂-Emissionen pro Wasserzähler."
@@ -1050,12 +1107,15 @@ class CircularEconomyDashboard:
 
         # Create materials panel
         materials_panel = ttk.LabelFrame(
-            self.viz_column, text="Rohmaterialbedarf (kg)", style="TLabelframe"
+            self.viz_column, style="TLabelframe"
         )
         materials_panel.pack(fill="x", expand=False, pady=(0, PAD_Y_PANEL))
 
+        materials_title = ttk.Label(materials_panel, text="Rohmaterialbedarf (kg)", style="Section.TLabel")
+        materials_panel.configure(labelwidget=materials_title)
+
         FuturisticTooltip(
-            materials_panel,
+            materials_title,
             "Rohmaterialbedarf pro Wasserzähler: neu gewonnenes Messing und Kunststoff. "
             "Recyclingmaterial wird hier nicht mitgezählt."
         )
@@ -1068,11 +1128,14 @@ class CircularEconomyDashboard:
     def create_livegraph_panel(self):
         """Create panel for saving and comparing records"""
         # old version:  Live Metrics Visualization
-        livegraph_panel = ttk.LabelFrame(self.viz_column, text="Szenarienvergleich")
+        livegraph_panel = ttk.LabelFrame(self.viz_column)
         livegraph_panel.pack(fill="both", expand=True, pady=0)
 
+        livegraph_title = ttk.Label(livegraph_panel, text="Szenarienvergleich", style="Section.TLabel")
+        livegraph_panel.configure(labelwidget=livegraph_title)
+
         FuturisticTooltip(
-            livegraph_panel,
+            livegraph_title,
             "Hier können bis zu drei Szenarien gespeichert und bezüglich Energie, CO₂, "
             "Kosten sowie Messing- und Kunststoffbedarf miteinander verglichen werden."
         )
@@ -1127,11 +1190,17 @@ class CircularEconomyDashboard:
         self.input_panel.configure(style="TLabelframe")
         
         # —— 合并后的分组标题 + 副标题（仍在 Input Parameters 面板内） ——
-        ttk.Label(
+        reuse_title = ttk.Label(
             self.input_panel,
             text="Zirkularitätsquoten (%)",
             style="Section.TLabel",
-        ).pack(anchor="w", padx=10, pady=(10, 2))
+        )
+        reuse_title.pack(anchor="w", padx=10, pady=(10, 2))
+        FuturisticTooltip(
+            reuse_title,
+            "Anteile für Reuse, Remanufacturing und Recycling, die den Energie-, Kosten- "
+            "und Materialberechnungen zugrunde liegen."
+        )
         ttk.Label(
             self.input_panel,
             text="Anteile für Reuse, Remanufacturing, Recycling",
@@ -1164,32 +1233,6 @@ class CircularEconomyDashboard:
             w.grid(row=r, column=c, padx=6, pady=4, sticky="w")
             self.knob_widgets.append(w)
 
-            if "Wasserzähler" in lbl:
-                FuturisticTooltip(
-                    w,
-                    "Anteil kompletter Wasserzähler, die ohne Demontage weiterverwendet werden."
-                )
-            elif lbl == "Impeller\nRemanufacturing":
-                FuturisticTooltip(
-                    w,
-                    "Anteil der Impeller, die nach Demontage aufgearbeitet und wieder eingesetzt werden."
-                )
-            elif lbl == "Housing\nRemanufacturing":
-                FuturisticTooltip(
-                    w,
-                    "Anteil der Gehäuse, die nach Demontage aufgearbeitet und wieder eingesetzt werden."
-                )
-            elif lbl == "Impeller\nRecycling":
-                FuturisticTooltip(
-                    w,
-                    "Anteil des verbliebenen Impeller-Materialbedarfs, der durch Recyclingmaterial gedeckt wird."
-                )
-            elif lbl == "Housing\nRecycling":
-                FuturisticTooltip(
-                    w,
-                    "Anteil des verbliebenen Gehäuse-Materialbedarfs, der durch Recyclingmaterial gedeckt wird."
-                )
-
         for col in (0, 1, 2):
             controls_grid.grid_columnconfigure(col, weight=1)
 
@@ -1207,24 +1250,25 @@ class CircularEconomyDashboard:
             self.knob_housing_recycling  = self.knob_widgets[4]
         
         # Energy mix inputs
-        ttk.Label(self.input_panel, text="Energiemix", style="Section.TLabel").pack(
-            pady=(20, 10), anchor="w", padx=10)
-
-        mix_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
-        mix_frame.pack(fill="x", padx=10, pady=5)
-
+        energy_title = ttk.Label(self.input_panel, text="Energiemix", style="Section.TLabel")
+        energy_title.pack(pady=(20, 10), anchor="w", padx=10)
         FuturisticTooltip(
-            mix_frame,
+            energy_title,
             "Der Energiemix beeinflusst sowohl die CO₂-Intensität (g CO₂/kWh) "
             "als auch den Strompreis (€/kWh) in den Berechnungen. "
             "Der Anteil 'Rest' umfasst übrige Quellen mit mittlerer CO₂-Intensität."
         )
+
+        mix_frame = ttk.Frame(self.input_panel, style="Panel.TFrame")
+        mix_frame.pack(fill="x", padx=10, pady=5)
         # ——— 电价面板 ———
         price_frame = ttk.Frame(mix_frame, style="Panel.TFrame")
         price_frame.pack(fill="x", pady=5)
 
+        price_title = ttk.Label(price_frame, text="Preisquelle", style="Panel.TLabel")
+        price_title.pack(side="left", padx=(0, 8))
         FuturisticTooltip(
-            price_frame,
+            price_title,
             "Wenn aktiviert, wird ein Durchschnittspreis aus dem ENTSO-E Day-Ahead-Markt "
             "geladen und an den eingestellten Energiemix angepasst."
         )
