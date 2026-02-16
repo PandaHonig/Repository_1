@@ -2,6 +2,9 @@
 // Solar：A0, DEFAULT(≈5V)；Wind：A1, INTERNAL(≈1.1V)
 
 #include <Arduino.h>
+#include <AccelStepper.h>
+#include <FastLED.h>
+#include <math.h>
 
 // ---------- Pins ----------
 const uint8_t PIN_SOLAR = A0;
@@ -13,7 +16,50 @@ const uint8_t PIN_POT1 = A2;
 const uint8_t PIN_POT2 = A3;
 const uint8_t PIN_POT3 = A4;
 const uint8_t PIN_POT4 = A5;
-const uint8_t PIN_POT5 = A6;  
+const uint8_t PIN_POT5 = A6;
+
+// ---------- Motor Pins ----------
+// Motor 1..7: STEP, DIR, ENABLE 引脚
+const uint8_t MOTOR1_STEP_PIN   = 22;
+const uint8_t MOTOR1_DIR_PIN    = 23;
+const uint8_t MOTOR1_ENABLE_PIN = 24;
+
+const uint8_t MOTOR2_STEP_PIN   = 25;
+const uint8_t MOTOR2_DIR_PIN    = 26;
+const uint8_t MOTOR2_ENABLE_PIN = 27;
+
+const uint8_t MOTOR3_STEP_PIN   = 28;
+const uint8_t MOTOR3_DIR_PIN    = 29;
+const uint8_t MOTOR3_ENABLE_PIN = 30;
+
+const uint8_t MOTOR4_STEP_PIN   = 31;
+const uint8_t MOTOR4_DIR_PIN    = 32;
+const uint8_t MOTOR4_ENABLE_PIN = 33;
+
+const uint8_t MOTOR5_STEP_PIN   = 34;
+const uint8_t MOTOR5_DIR_PIN    = 35;
+const uint8_t MOTOR5_ENABLE_PIN = 36;
+
+const uint8_t MOTOR6_STEP_PIN   = 37;
+const uint8_t MOTOR6_DIR_PIN    = 38;
+const uint8_t MOTOR6_ENABLE_PIN = 39;
+
+const uint8_t MOTOR7_STEP_PIN   = 40;
+const uint8_t MOTOR7_DIR_PIN    = 41;
+const uint8_t MOTOR7_ENABLE_PIN = 42;
+
+// ---------- LED Pins & Sizes ----------
+#define DATA_PIN_LED1 50
+#define DATA_PIN_LED2 51
+#define DATA_PIN_LED3 52
+#define DATA_PIN_LED4 53
+#define DATA_PIN_LED5 49
+
+#define NUM_LEDS_LED1 32
+#define NUM_LEDS_LED2 26
+#define NUM_LEDS_LED3 9
+#define NUM_LEDS_LED4 15
+#define NUM_LEDS_LED5 66
 
 // ===================== Solar =====================
 const uint16_t SOLAR_SAMPLE_MS = 50;
@@ -69,6 +115,59 @@ enum AnalogRefMode {
 
 volatile AnalogRefMode gAnalogRefMode = REF_DEFAULT;
 
+// ===================== Motor / LED 全局变量 =====================
+// Poti 映射得到的 rate（0.0 ~ 1.0）
+float meter_reuse_rate                = 0.0f;
+float impeller_remanufacturing_rate   = 0.0f;
+float housing_remanufacturing_rate    = 0.0f;
+float impeller_recycling_rate         = 0.0f;
+float housing_recycling_rate          = 0.0f;
+
+// 从 Python 传来的 Energiemix（0.0 ~ 1.0）
+float solar_energy_share = 0.0f;
+float wind_energy_share  = 0.0f;
+
+// 步进电机参数
+const float MOTOR_MAX_RPM = 200.0f;
+const float STEPS_PER_REVOLUTION = 200.0f; // full-step
+const float MOTOR_MAX_STEPS_PER_SECOND =
+    MOTOR_MAX_RPM / 60.0f * STEPS_PER_REVOLUTION;
+const float MIN_STEPS_PER_SECOND_FOR_ENABLE = 1.0f;
+
+// LED 动画参数
+const uint8_t LED_GLOBAL_BRIGHTNESS = 80;
+const float LED_FLOW_SPEED_MAX    = 1.0f;
+const float LED_ENERGY_SPEED_MAX  = 1.0f;
+
+CRGB leds1[NUM_LEDS_LED1];
+CRGB leds2[NUM_LEDS_LED2];
+CRGB leds3[NUM_LEDS_LED3];
+CRGB leds4[NUM_LEDS_LED4];
+CRGB leds5[NUM_LEDS_LED5];
+
+float led1_impeller_pos = 0.0f;
+float led1_housing_pos  = 0.0f;
+
+float led2_impeller_pos = 0.0f;
+float led2_housing_pos  = 0.0f;
+
+float led3_waste_pos    = 0.0f;
+float led4_raw_pos      = 0.0f;
+
+float led5_solar_pos    = 0.0f;
+float led5_wind_pos     = 0.0f;
+
+unsigned long last_led_update_ms = 0;
+
+// 步进电机实例
+AccelStepper motor1(AccelStepper::DRIVER, MOTOR1_STEP_PIN, MOTOR1_DIR_PIN);
+AccelStepper motor2(AccelStepper::DRIVER, MOTOR2_STEP_PIN, MOTOR2_DIR_PIN);
+AccelStepper motor3(AccelStepper::DRIVER, MOTOR3_STEP_PIN, MOTOR3_DIR_PIN);
+AccelStepper motor4(AccelStepper::DRIVER, MOTOR4_STEP_PIN, MOTOR4_DIR_PIN);
+AccelStepper motor5(AccelStepper::DRIVER, MOTOR5_STEP_PIN, MOTOR5_DIR_PIN);
+AccelStepper motor6(AccelStepper::DRIVER, MOTOR6_STEP_PIN, MOTOR6_DIR_PIN);
+AccelStepper motor7(AccelStepper::DRIVER, MOTOR7_STEP_PIN, MOTOR7_DIR_PIN);
+
 // ---------- 工具函数 ----------
 static inline void warmup(uint8_t pin, uint8_t aref) {
   analogReference(aref);
@@ -104,6 +203,152 @@ int readSmoothAnalog(uint8_t pin, uint8_t n=8) {
   return (int)(acc / n);
 }
 
+bool parseEmixLine(const String& line, float& solar, float& wind) {
+  solar = 0.0f;
+  wind  = 0.0f;
+  int matched = sscanf(line.c_str(), "EMIX: solar=%f,wind=%f", &solar, &wind);
+  return (matched == 2);
+}
+
+void applyMotorSpeed(AccelStepper& motor,
+                     uint8_t enablePin,
+                     float stepsPerSecond)
+{
+  float absSpeed = fabsf(stepsPerSecond);
+
+  if (absSpeed < MIN_STEPS_PER_SECOND_FOR_ENABLE) {
+    digitalWrite(enablePin, HIGH);
+    motor.setSpeed(0.0f);
+  } else {
+    digitalWrite(enablePin, LOW);
+    motor.setSpeed(stepsPerSecond);
+  }
+}
+
+void updateMotorsFromRates()
+{
+  float motor1_rpm_fraction = 1.0f;
+  float motor2_rpm_fraction = meter_reuse_rate;
+
+  float fraction_new_meters = 1.0f - meter_reuse_rate;
+  float motor3_rpm_fraction = fraction_new_meters * impeller_remanufacturing_rate;
+  float motor4_rpm_fraction = fraction_new_meters * housing_remanufacturing_rate;
+
+  float motor5_rpm_fraction = fraction_new_meters;
+
+  float fraction_new_impeller_components =
+      fraction_new_meters * (1.0f - impeller_remanufacturing_rate);
+  float fraction_new_housing_components  =
+      fraction_new_meters * (1.0f - housing_remanufacturing_rate);
+
+  float motor6_rpm_fraction = fraction_new_impeller_components;
+  float motor7_rpm_fraction = fraction_new_housing_components;
+
+  float s1 = motor1_rpm_fraction * MOTOR_MAX_STEPS_PER_SECOND;
+  float s2 = motor2_rpm_fraction * MOTOR_MAX_STEPS_PER_SECOND;
+  float s3 = motor3_rpm_fraction * MOTOR_MAX_STEPS_PER_SECOND;
+  float s4 = motor4_rpm_fraction * MOTOR_MAX_STEPS_PER_SECOND;
+  float s5 = motor5_rpm_fraction * MOTOR_MAX_STEPS_PER_SECOND;
+  float s6 = motor6_rpm_fraction * MOTOR_MAX_STEPS_PER_SECOND;
+  float s7 = motor7_rpm_fraction * MOTOR_MAX_STEPS_PER_SECOND;
+
+  applyMotorSpeed(motor1, MOTOR1_ENABLE_PIN, s1);
+  applyMotorSpeed(motor2, MOTOR2_ENABLE_PIN, s2);
+  applyMotorSpeed(motor3, MOTOR3_ENABLE_PIN, s3);
+  applyMotorSpeed(motor4, MOTOR4_ENABLE_PIN, s4);
+  applyMotorSpeed(motor5, MOTOR5_ENABLE_PIN, s5);
+  applyMotorSpeed(motor6, MOTOR6_ENABLE_PIN, s6);
+  applyMotorSpeed(motor7, MOTOR7_ENABLE_PIN, s7);
+}
+
+void updateLedsFromRates()
+{
+  unsigned long now = millis();
+  float dt = (now - last_led_update_ms) / 1000.0f;
+  if (dt <= 0.0f) return;
+  last_led_update_ms = now;
+
+  float speed_led1_impeller = LED_FLOW_SPEED_MAX
+      * (1.0f - meter_reuse_rate)
+      * (1.0f - impeller_remanufacturing_rate);
+
+  float speed_led1_housing = LED_FLOW_SPEED_MAX
+      * (1.0f - meter_reuse_rate)
+      * (1.0f - housing_remanufacturing_rate);
+
+  led1_impeller_pos += speed_led1_impeller * dt;
+  led1_housing_pos  += speed_led1_housing  * dt;
+
+  if (led1_impeller_pos >= NUM_LEDS_LED1) led1_impeller_pos -= NUM_LEDS_LED1;
+  if (led1_housing_pos  >= NUM_LEDS_LED1) led1_housing_pos  -= NUM_LEDS_LED1;
+
+  fill_solid(leds1, NUM_LEDS_LED1, CRGB::Black);
+  leds1[(int)led1_impeller_pos] = CRGB::Blue;
+  leds1[(int)led1_housing_pos]  = CRGB::Cyan;
+
+  float speed_led2_impeller = LED_FLOW_SPEED_MAX
+      * (1.0f - meter_reuse_rate)
+      * (1.0f - impeller_remanufacturing_rate)
+      * impeller_recycling_rate;
+
+  float speed_led2_housing = LED_FLOW_SPEED_MAX
+      * (1.0f - meter_reuse_rate)
+      * (1.0f - housing_remanufacturing_rate)
+      * housing_recycling_rate;
+
+  led2_impeller_pos += speed_led2_impeller * dt;
+  led2_housing_pos  += speed_led2_housing  * dt;
+
+  if (led2_impeller_pos >= NUM_LEDS_LED2) led2_impeller_pos -= NUM_LEDS_LED2;
+  if (led2_housing_pos  >= NUM_LEDS_LED2) led2_housing_pos  -= NUM_LEDS_LED2;
+
+  fill_solid(leds2, NUM_LEDS_LED2, CRGB::Black);
+  leds2[(int)led2_impeller_pos] = CRGB::Green;
+  leds2[(int)led2_housing_pos]  = CRGB::Yellow;
+
+  float waste_impeller_fraction =
+      (1.0f - meter_reuse_rate)
+      * (1.0f - impeller_remanufacturing_rate)
+      * (1.0f - impeller_recycling_rate);
+
+  float waste_housing_fraction =
+      (1.0f - meter_reuse_rate)
+      * (1.0f - housing_remanufacturing_rate)
+      * (1.0f - housing_recycling_rate);
+
+  float speed_led3_waste = LED_FLOW_SPEED_MAX
+      * (waste_impeller_fraction + waste_housing_fraction);
+
+  led3_waste_pos += speed_led3_waste * dt;
+  if (led3_waste_pos >= NUM_LEDS_LED3) led3_waste_pos -= NUM_LEDS_LED3;
+
+  fill_solid(leds3, NUM_LEDS_LED3, CRGB::Black);
+  leds3[(int)led3_waste_pos] = CRGB::Red;
+
+  float speed_led4_raw = speed_led3_waste;
+
+  led4_raw_pos += speed_led4_raw * dt;
+  if (led4_raw_pos >= NUM_LEDS_LED4) led4_raw_pos -= NUM_LEDS_LED4;
+
+  fill_solid(leds4, NUM_LEDS_LED4, CRGB::Black);
+  leds4[(int)led4_raw_pos] = CRGB(128, 128, 128);
+
+  float speed_led5_solar = LED_ENERGY_SPEED_MAX * solar_energy_share;
+  float speed_led5_wind  = LED_ENERGY_SPEED_MAX * wind_energy_share;
+
+  led5_solar_pos += speed_led5_solar * dt;
+  led5_wind_pos  += speed_led5_wind  * dt;
+
+  if (led5_solar_pos >= NUM_LEDS_LED5) led5_solar_pos -= NUM_LEDS_LED5;
+  if (led5_wind_pos  >= NUM_LEDS_LED5) led5_wind_pos  -= NUM_LEDS_LED5;
+
+  fill_solid(leds5, NUM_LEDS_LED5, CRGB::Black);
+  leds5[(int)led5_solar_pos] = CRGB::Orange;
+  leds5[(int)led5_wind_pos]  = CRGB::Green;
+
+  FastLED.show();
+}
+
 // 读取 5 个 Poti，并输出一行串口数据：POTS: v1,v2,v3,v4,v5
 void readAndPrintPots() {
   AnalogRefMode prevRef = gAnalogRefMode;
@@ -126,6 +371,12 @@ void readAndPrintPots() {
   Serial.print(v3); Serial.print(',');
   Serial.print(v4); Serial.print(',');
   Serial.println(v5);
+
+  meter_reuse_rate              = constrain(v1, 0, 1023) / 1023.0f;
+  impeller_remanufacturing_rate = constrain(v2, 0, 1023) / 1023.0f;
+  housing_remanufacturing_rate  = constrain(v3, 0, 1023) / 1023.0f;
+  impeller_recycling_rate       = constrain(v4, 0, 1023) / 1023.0f;
+  housing_recycling_rate        = constrain(v5, 0, 1023) / 1023.0f;
 
   if (prevRef == REF_INTERNAL1V1) {
     analogReference(INTERNAL1V1);
@@ -183,11 +434,75 @@ void setup() {
     Serial.print(F("  V(A1)=")); Serial.print(v,3); Serial.print(F(" V  "));
     Serial.println(spinning ? F("[SPINNING]") : F("[STOPPED]"));
   }
+
+  pinMode(MOTOR1_ENABLE_PIN, OUTPUT);
+  pinMode(MOTOR2_ENABLE_PIN, OUTPUT);
+  pinMode(MOTOR3_ENABLE_PIN, OUTPUT);
+  pinMode(MOTOR4_ENABLE_PIN, OUTPUT);
+  pinMode(MOTOR5_ENABLE_PIN, OUTPUT);
+  pinMode(MOTOR6_ENABLE_PIN, OUTPUT);
+  pinMode(MOTOR7_ENABLE_PIN, OUTPUT);
+
+  digitalWrite(MOTOR1_ENABLE_PIN, HIGH);
+  digitalWrite(MOTOR2_ENABLE_PIN, HIGH);
+  digitalWrite(MOTOR3_ENABLE_PIN, HIGH);
+  digitalWrite(MOTOR4_ENABLE_PIN, HIGH);
+  digitalWrite(MOTOR5_ENABLE_PIN, HIGH);
+  digitalWrite(MOTOR6_ENABLE_PIN, HIGH);
+  digitalWrite(MOTOR7_ENABLE_PIN, HIGH);
+
+  motor1.setMaxSpeed(MOTOR_MAX_STEPS_PER_SECOND);
+  motor2.setMaxSpeed(MOTOR_MAX_STEPS_PER_SECOND);
+  motor3.setMaxSpeed(MOTOR_MAX_STEPS_PER_SECOND);
+  motor4.setMaxSpeed(MOTOR_MAX_STEPS_PER_SECOND);
+  motor5.setMaxSpeed(MOTOR_MAX_STEPS_PER_SECOND);
+  motor6.setMaxSpeed(MOTOR_MAX_STEPS_PER_SECOND);
+  motor7.setMaxSpeed(MOTOR_MAX_STEPS_PER_SECOND);
+
+  float accel = MOTOR_MAX_STEPS_PER_SECOND * 2.0f;
+  motor1.setAcceleration(accel);
+  motor2.setAcceleration(accel);
+  motor3.setAcceleration(accel);
+  motor4.setAcceleration(accel);
+  motor5.setAcceleration(accel);
+  motor6.setAcceleration(accel);
+  motor7.setAcceleration(accel);
+
+  FastLED.addLeds<WS2812B, DATA_PIN_LED1, GRB>(leds1, NUM_LEDS_LED1);
+  FastLED.addLeds<WS2812B, DATA_PIN_LED2, GRB>(leds2, NUM_LEDS_LED2);
+  FastLED.addLeds<WS2812B, DATA_PIN_LED3, GRB>(leds3, NUM_LEDS_LED3);
+  FastLED.addLeds<WS2812B, DATA_PIN_LED4, GRB>(leds4, NUM_LEDS_LED4);
+  FastLED.addLeds<WS2812B, DATA_PIN_LED5, GRB>(leds5, NUM_LEDS_LED5);
+
+  FastLED.setBrightness(LED_GLOBAL_BRIGHTNESS);
+  FastLED.clear();
+  FastLED.show();
+
+  last_led_update_ms = millis();
 }
 
 // ===================== Loop =====================
 void loop() {
   const unsigned long now = millis();
+
+  static String serialLine;
+  while (Serial.available() > 0) {
+    char c = (char)Serial.read();
+    if (c == '\n' || c == '\r') {
+      if (serialLine.startsWith("EMIX:")) {
+        float solar, wind;
+        if (parseEmixLine(serialLine, solar, wind)) {
+          solar_energy_share = solar;
+          wind_energy_share  = wind;
+        }
+      }
+      serialLine = "";
+    } else {
+      if (serialLine.length() < 80) {
+        serialLine += c;
+      }
+    }
+  }
 
   // —— 定期读取 5 个 Poti 并发送到串口 ——
   if (now - tPotPrint >= POT_PRINT_MS) {
@@ -299,4 +614,15 @@ void loop() {
       }
     }
   }
+
+  updateMotorsFromRates();
+  motor1.runSpeed();
+  motor2.runSpeed();
+  motor3.runSpeed();
+  motor4.runSpeed();
+  motor5.runSpeed();
+  motor6.runSpeed();
+  motor7.runSpeed();
+
+  updateLedsFromRates();
 }
