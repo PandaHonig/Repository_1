@@ -153,6 +153,7 @@ LEGEND_SPACING      = 12 if COMPACT else 22
 LEGEND_BOX          = 7
 
 SHOW_CALC_TABS = False
+POTI_ONLY = True
 
 class CircularControl(tk.Canvas):
     """A futuristic circular control for setting percentage values"""
@@ -1230,6 +1231,9 @@ class CircularEconomyDashboard:
                 radius=GAUGE_RADIUS,
                 callback=self.calculate_and_update,
             )
+            if POTI_ONLY:
+                for ev in ("<ButtonPress-1>", "<B1-Motion>", "<ButtonRelease-1>"):
+                    w.unbind(ev)
             w.grid(row=r, column=c, padx=6, pady=4, sticky="w")
             self.knob_widgets.append(w)
 
