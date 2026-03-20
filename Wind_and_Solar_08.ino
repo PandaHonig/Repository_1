@@ -8,6 +8,13 @@ const uint8_t PIN_SOLAR = A0;
 const uint8_t PIN_WIND  = A1;
 const uint8_t PIN_LED   = 13;   // 风转动指示
 
+// ---------- Potentiometer Pins (for 5 dashboard knobs) ----------
+const uint8_t PIN_POT1 = A2;
+const uint8_t PIN_POT2 = A3;
+const uint8_t PIN_POT3 = A4;
+const uint8_t PIN_POT4 = A5;
+const uint8_t PIN_POT5 = A6;  // 如果板子没有 A6，可以改成其他空闲模拟脚
+
 // ===================== Solar =====================
 const uint16_t SOLAR_SAMPLE_MS = 50;
 const uint16_t SOLAR_CAL_MS    = 3000;
@@ -44,6 +51,10 @@ bool  spinning      = false;
 float wind_v_ema    = 0.0f;
 unsigned long tWind = 0, tWindPrint = 0;
 
+// ===================== Potentiometers (5x) =====================
+const unsigned POT_PRINT_MS = 100;  // 每 100 ms 打印一次 Poti 数值
+unsigned long tPotPrint = 0;
+
 // ===================== 分时窗口采样控制 =====================
 enum Window { W_SOLAR, W_WIND };
 Window curWin = W_SOLAR;
@@ -69,8 +80,8 @@ static inline int analogReadAvg(uint8_t pin, int n) {
   return acc / n;
 }
 
-static inline float adcToVolt(int adc, float vref){ 
-  return adc*(vref/1023.0f); 
+static inline float adcToVolt(int adc, float vref){
+  return adc*(vref/1023.0f);
 }
 
 // ★ 修复：添加平滑读取函数（来自 Solar_2.ino）
@@ -78,6 +89,22 @@ int readSmoothAnalog(uint8_t pin, uint8_t n=8) {
   long acc = 0;
   for (uint8_t i=0; i<n; ++i) acc += analogRead(pin);
   return (int)(acc / n);
+}
+
+// 读取 5 个 Poti，并输出一行串口数据：POTS: v1,v2,v3,v4,v5
+void readAndPrintPots() {
+  int v1 = analogReadAvg(PIN_POT1, 4);
+  int v2 = analogReadAvg(PIN_POT2, 4);
+  int v3 = analogReadAvg(PIN_POT3, 4);
+  int v4 = analogReadAvg(PIN_POT4, 4);
+  int v5 = analogReadAvg(PIN_POT5, 4);
+
+  Serial.print(F("POTS: "));
+  Serial.print(v1); Serial.print(',');
+  Serial.print(v2); Serial.print(',');
+  Serial.print(v3); Serial.print(',');
+  Serial.print(v4); Serial.print(',');
+  Serial.println(v5);
 }
 
 // ===================== Setup =====================
@@ -136,7 +163,13 @@ void setup() {
 void loop() {
   const unsigned long now = millis();
 
-  // —— 窗口切换 —— 
+  // —— 定期读取 5 个 Poti 并发送到串口 ——
+  if (now - tPotPrint >= POT_PRINT_MS) {
+    tPotPrint = now;
+    readAndPrintPots();
+  }
+
+  // —— 窗口切换 ——
   if(now - tWinStart >= WINDOW_MS){
     tWinStart = now;
     if(curWin == W_SOLAR){
