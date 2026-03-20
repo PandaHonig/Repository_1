@@ -61,9 +61,22 @@ Window curWin = W_SOLAR;
 const unsigned long WINDOW_MS = 300;
 unsigned long tWinStart = 0;
 
+// 记录当前 analogReference 使用的是哪种模式
+enum AnalogRefMode {
+  REF_DEFAULT,
+  REF_INTERNAL1V1
+};
+
+volatile AnalogRefMode gAnalogRefMode = REF_DEFAULT;
+
 // ---------- 工具函数 ----------
 static inline void warmup(uint8_t pin, uint8_t aref) {
   analogReference(aref);
+  if (aref == DEFAULT) {
+    gAnalogRefMode = REF_DEFAULT;
+  } else if (aref == INTERNAL1V1) {
+    gAnalogRefMode = REF_INTERNAL1V1;
+  }
   delayMicroseconds(400);
   (void)analogRead(pin);
   (void)analogRead(pin);
@@ -93,6 +106,14 @@ int readSmoothAnalog(uint8_t pin, uint8_t n=8) {
 
 // 读取 5 个 Poti，并输出一行串口数据：POTS: v1,v2,v3,v4,v5
 void readAndPrintPots() {
+  AnalogRefMode prevRef = gAnalogRefMode;
+
+  if (prevRef != REF_DEFAULT) {
+    analogReference(DEFAULT);
+    gAnalogRefMode = REF_DEFAULT;
+    delayMicroseconds(200);
+  }
+
   int v1 = analogReadAvg(PIN_POT1, 4);
   int v2 = analogReadAvg(PIN_POT2, 4);
   int v3 = analogReadAvg(PIN_POT3, 4);
@@ -105,6 +126,12 @@ void readAndPrintPots() {
   Serial.print(v3); Serial.print(',');
   Serial.print(v4); Serial.print(',');
   Serial.println(v5);
+
+  if (prevRef == REF_INTERNAL1V1) {
+    analogReference(INTERNAL1V1);
+    gAnalogRefMode = REF_INTERNAL1V1;
+    delayMicroseconds(200);
+  }
 }
 
 // ===================== Setup =====================
